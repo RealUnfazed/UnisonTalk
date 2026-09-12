@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an idea or improvement for UnisonTalk
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea? Great — this project is meant to grow. A little context goes a long way.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What's missing or annoying today?
+      placeholder: There's no way to see who has read a message, so...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Sketch it out however is easiest — text, a rough API, a UI description.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you thought about, and why this one seems better.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Are you willing to work on this?
+      options:
+        - label: I'd like to submit a PR for this myself
+          required: false

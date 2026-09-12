@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head', { title: 'Sign up' }) %>
+</head>
+<body class="bg-mist min-h-screen flex items-center justify-center px-4">
+
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center gap-2 text-ink">
+        <i class="fa-solid fa-tower-broadcast text-signal text-2xl"></i>
+        <span class="font-display font-bold text-2xl tracking-tight">UnisonTalk</span>
+      </div>
+      <p class="text-slate mt-2 text-sm">Conversations, in sync, in real time.</p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-black/5 p-8">
+      <h1 class="font-display font-semibold text-xl text-ink mb-6">Create your account</h1>
+
+      <% if (error) { %>
+        <div class="mb-5 text-sm text-ember bg-ember/10 border border-ember/20 rounded-lg px-3 py-2">
+          <%= error %>
+        </div>
+      <% } %>
+
+      <form method="POST" action="/register" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="username">Username</label>
+          <input
+            id="username" name="username" type="text" required autofocus minlength="3" maxlength="24"
+            pattern="[a-zA-Z0-9_]+" title="Letters, numbers and underscores only"
+            value="<%= values.username || '' %>"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="jane_doe"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="email">Email</label>
+          <input
+            id="email" name="email" type="email" required
+            value="<%= values.email || '' %>"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="jane@example.com"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="password">Password</label>
+          <input
+            id="password" name="password" type="password" required minlength="6"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="At least 6 characters"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="confirmPassword">Confirm password</label>
+          <input
+            id="confirmPassword" name="confirmPassword" type="password" required minlength="6"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="Type it again"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full bg-ink text-white font-medium text-sm rounded-lg py-2.5 mt-2 hover:bg-ink-light transition-colors"
+        >
+          Create account
+        </button>
+      </form>
+    </div>
+
+    <p class="text-center text-sm text-slate mt-6">
+      Already have an account?
+      <a href="/login" class="text-ink font-medium hover:text-signal-dark">Log in</a>
+    </p>
+  </div>
+
+</body>
+</html>

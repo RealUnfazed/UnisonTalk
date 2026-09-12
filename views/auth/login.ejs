@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head', { title: 'Log in' }) %>
+</head>
+<body class="bg-mist min-h-screen flex items-center justify-center px-4">
+
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center gap-2 text-ink">
+        <i class="fa-solid fa-tower-broadcast text-signal text-2xl"></i>
+        <span class="font-display font-bold text-2xl tracking-tight">UnisonTalk</span>
+      </div>
+      <p class="text-slate mt-2 text-sm">Conversations, in sync, in real time.</p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-black/5 p-8">
+      <h1 class="font-display font-semibold text-xl text-ink mb-6">Log in to your account</h1>
+
+      <% if (error) { %>
+        <div class="mb-5 text-sm text-ember bg-ember/10 border border-ember/20 rounded-lg px-3 py-2">
+          <%= error %>
+        </div>
+      <% } %>
+
+      <form method="POST" action="/login" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="username">Username</label>
+          <input
+            id="username" name="username" type="text" required autofocus
+            value="<%= values.username || '' %>"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="jane_doe"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="password">Password</label>
+          <input
+            id="password" name="password" type="password" required
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="••••••••"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full bg-ink text-white font-medium text-sm rounded-lg py-2.5 mt-2 hover:bg-ink-light transition-colors"
+        >
+          Log in
+        </button>
+      </form>
+    </div>
+
+    <p class="text-center text-sm text-slate mt-6">
+      New here?
+      <a href="/register" class="text-ink font-medium hover:text-signal-dark">Create an account</a>
+    </p>
+  </div>
+
+</body>
+</html>

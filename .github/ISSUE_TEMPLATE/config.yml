@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question / start a discussion
+    url: https://github.com/RealUnfazed/unisontalk/discussions
+    about: For usage questions or open-ended ideas that aren't quite a bug or a concrete feature request yet.
