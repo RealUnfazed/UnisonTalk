@@ -1,11 +1,11 @@
 {
   "name": "unisontalk",
-  "version": "1.0.0",
-  "description": "UnisonTalk — a real-time chat platform built with Express, EJS, Socket.IO and MongoDB",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "UnisonTalk — an end-to-end encrypted, real-time chat platform with a separated client/server MVC architecture (Express + Socket.IO + MongoDB API, vanilla-JS client)",
+  "main": "server/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js"
   },
   "author": "Alireza Asakareh (RealUnfazed) <https://github.com/RealUnfazed>",
   "license": "MIT",
@@ -20,8 +20,8 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "connect-mongo": "^5.1.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "ejs": "^3.1.10",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "mongoose": "^8.5.0",

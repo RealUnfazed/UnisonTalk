@@ -29,6 +29,8 @@ unless you'd prefer otherwise.
 
 A few things worth knowing if you're evaluating this project for production use, since it started as a learning/reference implementation:
 
-- Session cookies and file uploads are configured for local development by default (see `.env.example` and `middleware/upload.js`). Review cookie `secure`/`sameSite` settings and upload storage (local disk vs. object storage) before deploying publicly.
+- **Read the "Security model" section in [README.md](./README.md) first.** It's a disclosed, honest list of what the end-to-end encryption does and doesn't protect against (no forward secrecy, no safety-number verification, no multi-device sync, no group re-keying on membership changes). None of this is a secret bug — it's documented scope.
+- Encryption/decryption happen entirely client-side. The server (`server/`) and MongoDB only ever store ciphertext — this means a database compromise or a subpoena for stored data does not expose message contents, but a **compromised client** (malicious browser extension, XSS, a device someone already has physical access to) exposes exactly what that user could already read, same as any E2EE app.
+- Session cookies are configured for local development by default (see `.env.example` and `server/app.js`). Review the cookie `secure`/`sameSite` settings and set `ALLOWED_ORIGIN` before deploying publicly.
 - There's no built-in rate limiting on login, registration, or message sending.
-- Uploaded files are validated by MIME type and size, but are served directly from `public/uploads/` — consider a dedicated storage service with stricter access controls for production.
+- Encrypted attachments are served directly from `server/uploads/` (see `server/middleware/upload.js`) — this is lower-risk than it would be for an unencrypted app, since what's on disk is ciphertext, but you'd still want a dedicated storage service with proper access controls and backup/retention policies for production.

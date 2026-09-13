@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UnisonTalk · Chat</title>
+<link rel="icon" href="data:," />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+  rel="stylesheet"
+/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#1B2036',
+          'ink-light': '#262C46',
+          mist: '#EEF1F0',
+          signal: '#D9A62E',
+          'signal-dark': '#B5871F',
+          harmony: '#3E8E7E',
+          ember: '#C1523B',
+          slate: { DEFAULT: '#5B6472' },
+        },
+        fontFamily: {
+          display: ['"Space Grotesk"', 'sans-serif'],
+          sans: ['Manrope', 'sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: 'Manrope', sans-serif; }
+  .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .bubble-own { border-radius: 1rem 1rem 0.25rem 1rem; }
+  .bubble-other { border-radius: 1rem 1rem 1rem 0.25rem; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background-color: rgba(27, 32, 54, 0.2); border-radius: 999px; }
+  @keyframes pulse-dot { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
+  .typing-dot { animation: pulse-dot 1s infinite ease-in-out; }
+</style>
+</head>
+<body class="bg-mist h-screen overflow-hidden font-sans text-ink">
+
+  <div class="flex h-screen">
+
+    <!-- ============ Sidebar ============ -->
+    <aside class="w-[320px] shrink-0 bg-ink text-white flex flex-col">
+
+      <div class="px-5 py-5 flex items-center justify-between border-b border-white/10">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-tower-broadcast text-signal text-lg"></i>
+          <span class="font-display font-bold text-lg tracking-tight">UnisonTalk</span>
+        </div>
+        <div class="relative">
+          <button id="new-menu-btn" class="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors" title="Start something new">
+            <i class="fa-solid fa-plus text-sm"></i>
+          </button>
+          <div id="new-menu" class="hidden absolute right-0 mt-2 w-48 bg-white text-ink rounded-xl shadow-lg border border-black/5 overflow-hidden z-20">
+            <button data-open-modal="new-chat-modal" class="w-full text-left px-4 py-2.5 text-sm hover:bg-mist flex items-center gap-2.5">
+              <i class="fa-solid fa-user-plus text-slate w-4"></i> New direct chat
+            </button>
+            <button data-open-modal="new-group-modal" class="w-full text-left px-4 py-2.5 text-sm hover:bg-mist flex items-center gap-2.5">
+              <i class="fa-solid fa-users text-slate w-4"></i> New group
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-4 pt-4 pb-2">
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-xs"></i>
+          <input
+            id="chat-filter" type="text" placeholder="Filter conversations"
+            class="w-full bg-white/10 placeholder-white/40 text-sm rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-signal"
+          />
+        </div>
+      </div>
+
+      <div id="chat-list" class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5"></div>
+
+      <div class="px-4 py-3 border-t border-white/10 flex items-center gap-3">
+        <img id="me-avatar" src="" alt="" class="w-9 h-9 rounded-full object-cover" />
+        <div class="flex-1 min-w-0">
+          <p id="me-username" class="text-sm font-medium truncate"></p>
+          <p class="text-xs text-harmony flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-harmony inline-block"></span> Online
+          </p>
+        </div>
+        <button id="logout-btn" type="button" title="Log out" class="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/70">
+          <i class="fa-solid fa-arrow-right-from-bracket text-sm"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ============ Main pane ============ -->
+    <main class="flex-1 flex flex-col min-w-0">
+
+      <!-- Empty state -->
+      <div id="empty-state" class="flex-1 flex flex-col items-center justify-center text-center px-6">
+        <i class="fa-solid fa-lock text-4xl text-ink/15 mb-4"></i>
+        <p class="font-display text-lg text-ink/70 font-medium">Pick a conversation, or start one</p>
+        <p class="text-slate text-sm mt-1 max-w-xs">Every message is encrypted in your browser before it ever leaves — even we can't read them.</p>
+      </div>
+
+      <!-- Active chat -->
+      <div id="active-chat" class="hidden flex-1 flex flex-col min-h-0">
+        <header class="px-6 py-4 border-b border-black/5 bg-white flex items-center gap-3">
+          <img id="chat-header-avatar" src="" alt="" class="w-10 h-10 rounded-full object-cover" />
+          <div class="min-w-0">
+            <p id="chat-header-name" class="font-display font-semibold text-ink truncate"></p>
+            <p id="chat-header-status" class="text-xs text-slate">&nbsp;</p>
+          </div>
+        </header>
+
+        <div id="messages" class="flex-1 overflow-y-auto px-6 py-5 space-y-3"></div>
+
+        <div id="typing-indicator" class="hidden px-6 pb-1 text-xs text-slate items-center gap-1.5">
+          <span></span>
+          <span class="flex gap-0.5">
+            <span class="w-1 h-1 rounded-full bg-slate typing-dot" style="animation-delay:0ms"></span>
+            <span class="w-1 h-1 rounded-full bg-slate typing-dot" style="animation-delay:150ms"></span>
+            <span class="w-1 h-1 rounded-full bg-slate typing-dot" style="animation-delay:300ms"></span>
+          </span>
+        </div>
+
+        <div id="attachment-preview" class="hidden mx-6 mb-2 px-3 py-2 bg-white border border-black/10 rounded-lg text-sm flex items-center justify-between">
+          <span class="flex items-center gap-2 text-ink truncate">
+            <i class="fa-solid fa-paperclip text-slate"></i>
+            <span id="attachment-preview-name" class="truncate"></span>
+          </span>
+          <button id="attachment-remove" class="text-slate hover:text-ember px-2"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <form id="composer" class="px-6 py-4 bg-white border-t border-black/5 flex items-end gap-3">
+          <label class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-slate hover:bg-mist cursor-pointer" title="Attach a file">
+            <i class="fa-solid fa-paperclip"></i>
+            <input id="file-input" type="file" class="hidden" />
+          </label>
+          <textarea
+            id="message-input" rows="1" placeholder="Write an encrypted message"
+            class="flex-1 resize-none max-h-32 rounded-xl border border-black/10 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+          ></textarea>
+          <button type="submit" class="w-10 h-10 shrink-0 rounded-full bg-signal hover:bg-signal-dark text-ink flex items-center justify-center transition-colors" title="Send message">
+            <i class="fa-solid fa-paper-plane text-sm"></i>
+          </button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ New direct chat modal ============ -->
+  <div id="new-chat-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display font-semibold text-lg">New direct chat</h2>
+        <button data-close-modal class="text-slate hover:text-ink"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="relative mb-3">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate/50 text-xs"></i>
+        <input id="user-search-input" type="text" placeholder="Search by username"
+          class="w-full border border-black/10 rounded-lg pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal" />
+      </div>
+      <div id="user-search-results" class="space-y-1 max-h-64 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <!-- ============ New group modal ============ -->
+  <div id="new-group-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display font-semibold text-lg">New group</h2>
+        <button data-close-modal class="text-slate hover:text-ink"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <input id="group-name-input" type="text" placeholder="Group name" maxlength="40"
+        class="w-full border border-black/10 rounded-lg px-3.5 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal" />
+      <div class="relative mb-3">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate/50 text-xs"></i>
+        <input id="group-user-search-input" type="text" placeholder="Add members by username"
+          class="w-full border border-black/10 rounded-lg pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal" />
+      </div>
+      <div id="group-selected" class="flex flex-wrap gap-1.5 mb-2 empty:mb-0"></div>
+      <div id="group-user-search-results" class="space-y-1 max-h-40 overflow-y-auto mb-4"></div>
+      <button id="create-group-btn" class="w-full bg-ink text-white text-sm font-medium rounded-lg py-2.5 hover:bg-ink-light transition-colors">
+        Create group
+      </button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/src/pages/chatPage.js"></script>
+</body>
+</html>

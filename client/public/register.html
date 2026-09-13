@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UnisonTalk · Sign up</title>
+<link rel="icon" href="data:," />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+  rel="stylesheet"
+/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#1B2036',
+          'ink-light': '#262C46',
+          mist: '#EEF1F0',
+          signal: '#D9A62E',
+          'signal-dark': '#B5871F',
+          harmony: '#3E8E7E',
+          ember: '#C1523B',
+          slate: { DEFAULT: '#5B6472' },
+        },
+        fontFamily: {
+          display: ['"Space Grotesk"', 'sans-serif'],
+          sans: ['Manrope', 'sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: 'Manrope', sans-serif; }
+  .font-display { font-family: 'Space Grotesk', sans-serif; }
+</style>
+</head>
+<body class="bg-mist min-h-screen flex items-center justify-center px-4">
+
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center gap-2 text-ink">
+        <i class="fa-solid fa-tower-broadcast text-signal text-2xl"></i>
+        <span class="font-display font-bold text-2xl tracking-tight">UnisonTalk</span>
+      </div>
+      <p class="text-slate mt-2 text-sm">End-to-end encrypted, in real time.</p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-black/5 p-8">
+      <h1 class="font-display font-semibold text-xl text-ink mb-6">Create your account</h1>
+
+      <p id="form-error" class="hidden mb-5 text-sm text-ember bg-ember/10 border border-ember/20 rounded-lg px-3 py-2"></p>
+
+      <form id="register-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="username">Username</label>
+          <input
+            id="username" name="username" type="text" required autofocus minlength="3" maxlength="24"
+            pattern="[a-zA-Z0-9_]+" title="Letters, numbers and underscores only"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="jane_doe"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="email">Email</label>
+          <input
+            id="email" name="email" type="email" required
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="jane@example.com"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="password">Password</label>
+          <input
+            id="password" name="password" type="password" required minlength="6"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="At least 6 characters"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-ink mb-1.5" for="confirmPassword">Confirm password</label>
+          <input
+            id="confirmPassword" name="confirmPassword" type="password" required minlength="6"
+            class="w-full rounded-lg border border-black/10 px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
+            placeholder="Type it again"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full bg-ink text-white font-medium text-sm rounded-lg py-2.5 mt-2 hover:bg-ink-light transition-colors"
+        >
+          Create account
+        </button>
+      </form>
+      <p class="text-xs text-slate mt-4">
+        <i class="fa-solid fa-shield-halved mr-1"></i>
+        An encryption key pair is generated in your browser when you sign up. Only its public half is ever sent to the server.
+      </p>
+    </div>
+
+    <p class="text-center text-sm text-slate mt-6">
+      Already have an account?
+      <a href="/login.html" class="text-ink font-medium hover:text-signal-dark">Log in</a>
+    </p>
+  </div>
+
+  <script type="module" src="/src/pages/registerPage.js"></script>
+</body>
+</html>
