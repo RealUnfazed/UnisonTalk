@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $ } from '../utils/dom.js';
 import { getSecretChatKey } from '../crypto/chatKeys.js';
-import { encryptText, decryptText, encryptBytes, decryptBytes } from '../crypto/webcrypto.js';
+import { encryptText, decryptText, encryptBytes, decryptBytes, b64ToBuf } from '../crypto/webcrypto.js';
 import { getOrCreateIdentity } from '../crypto/identity.js';
 import { formatFileSize } from '../utils/format.js';
 
@@ -328,17 +328,26 @@ export class ChatController {
   // message for each stage (network vs. decrypt) instead of one generic
   // "something went wrong" — this is what actually makes a real failure
   // diagnosable instead of just visible.
+  //
+  // Deliberately goes through /api/attachments/:filename (a JSON response)
+  // rather than fetching msg.attachment.url (a plain static file) directly.
+  // A raw file URL — especially serving application/octet-stream with a
+  // generic extension, which is exactly what ciphertext looks like — is
+  // precisely the pattern download-manager browser extensions (IDM and
+  // similar) watch for and hijack, intercepting the request before this
+  // function ever sees the response body. A JSON API response doesn't
+  // look like a downloadable file to anything, so there's nothing to grab.
   async fetchAndDecryptFile(msg, key) {
-    let res;
+    const filename = msg.attachment.url.split('/').pop();
+
+    let data;
     try {
-      res = await fetch(msg.attachment.url);
-    } catch {
-      throw new Error('Could not reach the server to download this file.');
+      ({ data } = await api.get(`/api/attachments/${filename}`));
+    } catch (err) {
+      throw new Error(err.message || 'Could not reach the server to download this file.');
     }
-    if (!res.ok) {
-      throw new Error(`Download failed (server returned ${res.status}).`);
-    }
-    const cipherBuffer = await res.arrayBuffer();
+
+    const cipherBuffer = b64ToBuf(data);
     try {
       return await decryptBytes(key, cipherBuffer, msg.attachment.fileIv);
     } catch (err) {

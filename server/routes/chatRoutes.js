@@ -1,6 +1,6 @@
 const express = require('express');
 const chatController = require('../controllers/chatController');
-const { uploadAttachment } = require('../controllers/uploadController');
+const { uploadAttachment, getAttachmentBytes } = require('../controllers/uploadController');
 const { requireAuth } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
@@ -16,5 +16,6 @@ router.get('/chats/:chatId/messages', chatController.getMessages);
 router.get('/users/search', chatController.searchUsers);
 
 router.post('/upload', upload.single('file'), uploadAttachment);
+router.get('/attachments/:filename', getAttachmentBytes);
 
 module.exports = router;
