@@ -1,6 +1,5 @@
 import { api } from '../api.js';
 import { $ } from '../utils/dom.js';
-import { getOrCreateIdentity } from '../crypto/identity.js';
 
 const form = $('#register-form');
 const errorEl = $('#form-error');
@@ -10,6 +9,9 @@ function showError(message) {
   errorEl.classList.remove('hidden');
 }
 
+// No key generation here — accounts start with Cloud Chats only, which
+// need no keys at all. A Secret Chat identity is created lazily the first
+// time this browser actually opens or starts one.
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   errorEl.classList.add('hidden');
@@ -24,17 +26,11 @@ form.addEventListener('submit', async (e) => {
   submitBtn.disabled = true;
 
   try {
-    const { user } = await api.post('/api/auth/register', {
+    await api.post('/api/auth/register', {
       username: $('#username').value,
       email: $('#email').value,
       password,
     });
-
-    // Brand-new account: this is always a fresh identity key, generated
-    // right here and never sent to the server in any form.
-    const { publicKeyB64 } = await getOrCreateIdentity(user.id, user.publicKey);
-    await api.post('/api/auth/keys', { publicKey: publicKeyB64 });
-
     window.location.href = '/';
   } catch (err) {
     showError(err.message);

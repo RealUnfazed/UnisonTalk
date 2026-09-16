@@ -8,9 +8,8 @@ function serializeUser(user) {
     isOnline: !!user.isOnline,
     lastSeen: user.lastSeen,
     avatarUrl: new User(user).avatarUrl(),
-    // Public key material is, by definition, safe to hand to anyone —
-    // clients need it to encrypt messages/keys to this user. It's the
-    // *private* key that must never appear anywhere server-side.
+    // Only meaningful for Secret Chats — null for anyone who's never
+    // started one. Safe to expose: it's the public half of a key pair.
     publicKey: user.publicKey || null,
   };
 }
@@ -30,19 +29,11 @@ function serializeChat(chat, currentUserId) {
   return {
     id: chat._id.toString(),
     isGroup: chat.isGroup,
+    isSecret: !!chat.isSecret,
     name: displayName,
     participants,
     admin: chat.admin ? chat.admin.toString() : null,
     lastMessage: chat.lastMessage ? serializeMessage(chat.lastMessage) : null,
-    // Opaque to the server — just AES-GCM ciphertext of the group key,
-    // once per member. Sent in full; a client can only ever unwrap the
-    // single entry that matches its own user id and its own private key.
-    groupKeyWraps: (chat.groupKeyWraps || []).map((w) => ({
-      userId: (w.user._id || w.user).toString(),
-      wrappedKey: w.wrappedKey,
-      iv: w.iv,
-      wrapperPublicKey: w.wrapperPublicKey,
-    })),
     updatedAt: chat.updatedAt,
     createdAt: chat.createdAt,
   };
@@ -53,8 +44,10 @@ function serializeMessage(message) {
     id: message._id.toString(),
     chatId: message.chat._id ? message.chat._id.toString() : message.chat.toString(),
     sender: message.sender._id ? serializeUser(message.sender) : { id: message.sender.toString() },
-    // Ciphertext + IV only. The server has never seen, and cannot produce,
-    // the plaintext behind these fields.
+    // Cloud chats populate `content`; Secret chats populate
+    // `ciphertext`/`iv` instead. A given message only ever has one pair
+    // populated, matching its chat's mode.
+    content: message.content || null,
     ciphertext: message.ciphertext || null,
     iv: message.iv || null,
     attachment: message.attachment && message.attachment.url ? message.attachment : null,

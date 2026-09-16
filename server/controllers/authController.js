@@ -54,8 +54,7 @@ function logout(req, res) {
   });
 }
 
-// Lets the client re-establish "am I logged in?" on page load without
-// needing to store anything itself beyond the session cookie.
+// Lets the client re-establish "am I logged in?" on page load.
 async function me(req, res) {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
   const user = await User.findById(req.session.userId).select('-password').lean();
@@ -63,19 +62,16 @@ async function me(req, res) {
   res.json({ user: serializeUser(user) });
 }
 
-// The client calls this right after generating (or loading) its ECDH
-// identity key pair, uploading only the public half. The server has no
-// way to derive, guess, or reconstruct the private key from this.
+// Called lazily, the first time this browser needs a Secret Chat identity
+// key — most accounts that never use Secret Chats will never call this.
 async function updatePublicKey(req, res) {
   const { publicKey } = req.body;
   if (!publicKey || typeof publicKey !== 'string') {
     return res.status(400).json({ error: 'publicKey (base64 SPKI) is required.' });
   }
-  const user = await User.findByIdAndUpdate(
-    req.session.userId,
-    { publicKey },
-    { new: true }
-  ).select('-password');
+  const user = await User.findByIdAndUpdate(req.session.userId, { publicKey }, { new: true }).select(
+    '-password'
+  );
   res.json({ user: serializeUser(user) });
 }
 

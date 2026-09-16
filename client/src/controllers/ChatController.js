@@ -1,21 +1,31 @@
 import { api } from '../api.js';
 import { $ } from '../utils/dom.js';
-import { getChatKey, cacheChatKey, createGroupKeyWraps } from '../crypto/chatKeys.js';
+import { getSecretChatKey } from '../crypto/chatKeys.js';
 import { encryptText, decryptText, encryptBytes, decryptBytes } from '../crypto/webcrypto.js';
+import { getOrCreateIdentity } from '../crypto/identity.js';
+import { formatFileSize } from '../utils/format.js';
 
 // The "Controller" in this client-side MVC split: the only layer that
 // talks to AppState (the Model), the Views, the Socket.IO connection, the
 // REST API, and the crypto module all at once. Views never call the API or
-// touch crypto directly; AppState never renders anything. Keeping that
-// boundary is what makes this "MVC-looking" rather than just one big file.
+// touch crypto directly; AppState never renders anything.
+//
+// Every chat is one of two kinds (see chat.isSecret):
+//   Cloud Chat (default)  — plain text/files, stored server-side, synced
+//                            everywhere on login. No crypto touches these.
+//   Secret Chat           — genuinely end-to-end encrypted, device-bound,
+//                            opt-in. Only these ever call into crypto/*.
 export class ChatController {
-  constructor({ state, sidebarView, chatView, modalView, socket, keyPair }) {
+  constructor({ state, sidebarView, chatView, modalView, socket }) {
     this.state = state;
     this.sidebar = sidebarView;
     this.chat = chatView;
     this.modal = modalView;
     this.socket = socket;
-    this.keyPair = keyPair;
+
+    // Secret Chat identity, created lazily on first use — see ensureIdentity().
+    this.myIdentity = null;
+    this.identityPromise = null;
 
     this.oldestLoaded = new Map(); // chatId -> createdAt cursor of oldest message we have
     this.reachedStart = new Set();
@@ -23,10 +33,17 @@ export class ChatController {
     this.typingTimeout = null;
     this.typingHideTimers = new Map();
 
-    this.previewCache = new Map(); // messageId -> decrypted string | null
+    this.previewCache = new Map(); // messageId -> preview string | null
     this.previewInFlight = new Set();
 
+    // messageId -> attachment display info (see buildCloudAttachmentInfo /
+    // prepareSecretAttachmentInfo). Populated eagerly whenever a bubble
+    // with an attachment is built, so filename/size/preview show up
+    // immediately instead of behind a click.
+    this.attachmentCache = new Map();
+
     this.groupSelected = new Map(); // username -> user (for the "new group" modal)
+    this.chatModalMode = 'cloud'; // which kind the open "new chat" modal will create
 
     this.state.addEventListener('chats:changed', () => this.renderSidebar());
 
@@ -34,6 +51,54 @@ export class ChatController {
     this.wireSockets();
     this.wireModals();
     this.wireSidebarFilter();
+  }
+
+  // -------------------------------------------------------------------
+  // Secret Chat identity (lazy — Cloud Chats never touch this)
+  // -------------------------------------------------------------------
+
+  async ensureIdentity() {
+    if (this.myIdentity) return this.myIdentity;
+    if (this.identityPromise) return this.identityPromise;
+
+    this.identityPromise = (async () => {
+      const { keyPair, publicKeyB64, isNewDevice, mismatched } = await getOrCreateIdentity(
+        this.state.currentUser.id,
+        this.state.currentUser.publicKey
+      );
+
+      if (isNewDevice) {
+        alert(
+          "This browser doesn't have your Secret Chat key from another device.\n\n" +
+            "A fresh key was just created here. Secret Chats from before this point won't be " +
+            "readable on this device — that mirrors how Telegram's own Secret Chats work. " +
+            "Your Cloud Chats aren't affected at all."
+        );
+      } else if (mismatched) {
+        alert(
+          "Your Secret Chat key didn't match what's on file for your account, so it's been " +
+            "re-synced automatically.\n\n" +
+            'If any Secret Chat messages now show "Unable to decrypt this message," that\'s ' +
+            "why — they were encrypted under the previous key pairing and can't be recovered. " +
+            "New messages from now on will work normally. Your Cloud Chats aren't affected."
+        );
+      }
+
+      if (publicKeyB64 !== this.state.currentUser.publicKey) {
+        await api.post('/api/auth/keys', { publicKey: publicKeyB64 });
+        this.state.currentUser.publicKey = publicKeyB64;
+      }
+
+      const identity = { keyPair, publicKeyB64 };
+      this.myIdentity = identity;
+      return identity;
+    })();
+
+    try {
+      return await this.identityPromise;
+    } finally {
+      this.identityPromise = null;
+    }
   }
 
   // -------------------------------------------------------------------
@@ -49,11 +114,19 @@ export class ChatController {
   kickOffPreviewDecryption(chats) {
     chats.forEach((chat) => {
       const msg = chat.lastMessage;
-      if (!msg || !msg.ciphertext || msg.attachment) return;
+      if (!msg || msg.attachment) return;
+
+      if (!chat.isSecret) {
+        // Cloud chats: content is already plain — nothing to decrypt.
+        if (msg.content) this.previewCache.set(msg.id, msg.content);
+        return;
+      }
+
+      if (!msg.ciphertext) return;
       if (this.previewCache.has(msg.id) || this.previewInFlight.has(msg.id)) return;
 
       this.previewInFlight.add(msg.id);
-      this.decryptChatMessage(chat, msg)
+      this.decryptSecretMessage(chat, msg)
         .then((text) => this.previewCache.set(msg.id, text))
         .catch(() => this.previewCache.set(msg.id, null))
         .finally(() => {
@@ -63,9 +136,10 @@ export class ChatController {
     });
   }
 
-  async decryptChatMessage(chat, msg) {
+  async decryptSecretMessage(chat, msg) {
     if (!msg.ciphertext) return null;
-    const key = await getChatKey(chat, this.keyPair, this.state.currentUser.id);
+    await this.ensureIdentity();
+    const key = await getSecretChatKey(chat, this.myIdentity.keyPair, this.state.currentUser.id);
     return decryptText(key, msg.ciphertext, msg.iv);
   }
 
@@ -85,12 +159,15 @@ export class ChatController {
     this.socket.emit('join-chat', { chatId });
     this.chat.showLoading();
 
-    let key;
-    try {
-      key = await getChatKey(chat, this.keyPair, this.state.currentUser.id);
-    } catch (err) {
-      this.chat.showThreadError(err.message);
-      return;
+    let key = null;
+    if (chat.isSecret) {
+      try {
+        await this.ensureIdentity();
+        key = await getSecretChatKey(chat, this.myIdentity.keyPair, this.state.currentUser.id);
+      } catch (err) {
+        this.chat.showThreadError(err.message);
+        return;
+      }
     }
 
     try {
@@ -112,17 +189,183 @@ export class ChatController {
   }
 
   async buildBubbleFor(msg, chat, key) {
-    let decrypted = { text: null, decryptFailed: false };
-    if (msg.ciphertext) {
+    let decrypted;
+    if (chat.isSecret) {
+      decrypted = { text: null, decryptFailed: false };
+      if (msg.ciphertext) {
+        try {
+          decrypted = { text: await decryptText(key, msg.ciphertext, msg.iv), decryptFailed: false };
+        } catch {
+          decrypted = { text: null, decryptFailed: true };
+        }
+      }
+    } else {
+      decrypted = { text: msg.content || null, decryptFailed: false };
+    }
+
+    let attachmentInfo = null;
+    if (msg.attachment) {
+      attachmentInfo = chat.isSecret
+        ? await this.prepareSecretAttachmentInfo(msg, key)
+        : this.buildCloudAttachmentInfo(msg);
+    }
+
+    // For Secret Chats, `key` is captured here, tied to `chat` (the
+    // message's actual chat — every caller passes the chat msg belongs
+    // to), and reused for downloading instead of re-deriving it later
+    // from "whatever chat happens to be open right now".
+    const onDownload = chat.isSecret
+      ? () => this.downloadSecretAttachment(msg, key, attachmentInfo)
+      : () => this.downloadCloudAttachment(attachmentInfo);
+
+    return this.chat.buildBubble(msg, decrypted, attachmentInfo, this.state.currentUser.id, chat.isGroup, onDownload);
+  }
+
+  // -------------------------------------------------------------------
+  // Cloud Chat attachments — plain files, no crypto at all.
+  // -------------------------------------------------------------------
+
+  buildCloudAttachmentInfo(msg) {
+    return {
+      isSecret: false,
+      filename: msg.attachment.filename,
+      mimeType: msg.attachment.mimeType,
+      isImage: !!msg.attachment.isImage,
+      size: msg.attachment.size,
+      url: msg.attachment.url,
+    };
+  }
+
+  downloadCloudAttachment(info) {
+    const a = document.createElement('a');
+    a.href = info.url;
+    a.download = info.filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async uploadPlainFile(file) {
+    const form = new FormData();
+    form.append('file', file);
+    return api.postForm('/api/upload', form);
+  }
+
+  // -------------------------------------------------------------------
+  // Secret Chat attachments — encrypted client-side, decrypted on demand.
+  // -------------------------------------------------------------------
+
+  // Decrypts just the small metadata blob (filename/size/type) right away
+  // — cheap, and it's what lets the UI show "photo.jpg · 2.3 MB" without
+  // the person having to click anything first. For images specifically,
+  // also eagerly decrypts the (typically small) image bytes for an inline
+  // preview, Telegram-style; other file types stay lazy (decrypted only
+  // when the person hits download) since they could be much larger.
+  async prepareSecretAttachmentInfo(msg, key) {
+    if (this.attachmentCache.has(msg.id)) return this.attachmentCache.get(msg.id);
+
+    let meta;
+    try {
+      const metaJson = await decryptText(key, msg.attachment.metaCiphertext, msg.attachment.metaIv);
+      meta = JSON.parse(metaJson);
+    } catch (err) {
+      console.error('Attachment metadata decrypt failed:', err);
+      const info = { isSecret: true, metaFailed: true };
+      this.attachmentCache.set(msg.id, info);
+      return info;
+    }
+
+    const info = {
+      isSecret: true,
+      filename: meta.filename,
+      mimeType: meta.mimeType,
+      isImage: !!meta.isImage,
+      size: meta.size,
+      previewUrl: null,
+      decryptedBlob: null,
+    };
+
+    if (info.isImage) {
       try {
-        decrypted = { text: await decryptText(key, msg.ciphertext, msg.iv), decryptFailed: false };
-      } catch {
-        decrypted = { text: null, decryptFailed: true };
+        const bytes = await this.fetchAndDecryptFile(msg, key);
+        info.decryptedBlob = new Blob([bytes], { type: info.mimeType || 'image/png' });
+        info.previewUrl = URL.createObjectURL(info.decryptedBlob);
+      } catch (err) {
+        // Fine — buildAttachmentCard falls back to the filename+download
+        // row when previewUrl is null, so this isn't a dead end for the user.
+        console.error('Image preview decrypt failed:', err);
       }
     }
-    return this.chat.buildBubble(msg, decrypted, this.state.currentUser.id, chat.isGroup, (m, wrapEl) =>
-      this.handleAttachmentClick(m, wrapEl)
-    );
+
+    this.attachmentCache.set(msg.id, info);
+    return info;
+  }
+
+  // Downloads (if needed) and decrypts the actual file bytes, then saves
+  // them straight to the browser's normal download flow — no new tab, no
+  // "click to reveal a link, then click the link" two-step.
+  async downloadSecretAttachment(msg, key, attachmentInfo) {
+    let blob = attachmentInfo?.decryptedBlob;
+    if (!blob) {
+      const bytes = await this.fetchAndDecryptFile(msg, key);
+      blob = new Blob([bytes], { type: attachmentInfo?.mimeType || 'application/octet-stream' });
+      if (attachmentInfo) attachmentInfo.decryptedBlob = blob;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = attachmentInfo?.filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Delay revocation — some browsers start the download asynchronously
+    // and revoking immediately can cancel it before it's actually read.
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  // Fetches the encrypted bytes and decrypts them, with a distinct error
+  // message for each stage (network vs. decrypt) instead of one generic
+  // "something went wrong" — this is what actually makes a real failure
+  // diagnosable instead of just visible.
+  async fetchAndDecryptFile(msg, key) {
+    let res;
+    try {
+      res = await fetch(msg.attachment.url);
+    } catch {
+      throw new Error('Could not reach the server to download this file.');
+    }
+    if (!res.ok) {
+      throw new Error(`Download failed (server returned ${res.status}).`);
+    }
+    const cipherBuffer = await res.arrayBuffer();
+    try {
+      return await decryptBytes(key, cipherBuffer, msg.attachment.fileIv);
+    } catch (err) {
+      console.error('decryptBytes failed:', err);
+      throw new Error('Could not decrypt this file — the key or the stored data may not match.');
+    }
+  }
+
+  async encryptAndUploadFile(file, key) {
+    const fileBuffer = await file.arrayBuffer();
+    const { ciphertext: fileCipher, iv: fileIv } = await encryptBytes(key, fileBuffer);
+
+    const meta = {
+      filename: file.name,
+      mimeType: file.type,
+      isImage: file.type.startsWith('image/'),
+      size: file.size,
+    };
+    const { ciphertext: metaCiphertext, iv: metaIv } = await encryptText(key, JSON.stringify(meta));
+
+    const form = new FormData();
+    form.append('file', new Blob([fileCipher], { type: 'application/octet-stream' }), 'encrypted.bin');
+    form.append('fileIv', fileIv);
+    form.append('metaCiphertext', metaCiphertext);
+    form.append('metaIv', metaIv);
+
+    return api.postForm('/api/upload', form);
   }
 
   // Infinite scroll: fetch older messages when scrolled near the top.
@@ -145,7 +388,11 @@ export class ChatController {
           return;
         }
         const chat = this.state.chats.get(chatId);
-        const key = await getChatKey(chat, this.keyPair, this.state.currentUser.id);
+        let key = null;
+        if (chat.isSecret) {
+          await this.ensureIdentity();
+          key = await getSecretChatKey(chat, this.myIdentity.keyPair, this.state.currentUser.id);
+        }
         const nodes = [];
         for (const msg of older) nodes.push(await this.buildBubbleFor(msg, chat, key));
         nodes.forEach((node) => this.chat.prependMessage(node));
@@ -158,35 +405,7 @@ export class ChatController {
   }
 
   // -------------------------------------------------------------------
-  // Attachments: decrypt on demand, not eagerly, to save bandwidth/CPU.
-  // -------------------------------------------------------------------
-
-  async handleAttachmentClick(msg, wrapEl) {
-    try {
-      const chat = this.state.chats.get(this.state.activeChatId);
-      const key = await getChatKey(chat, this.keyPair, this.state.currentUser.id);
-
-      const res = await fetch(msg.attachment.url);
-      if (!res.ok) throw new Error('Could not download attachment');
-      const cipherBuffer = await res.arrayBuffer();
-
-      const [plainBuffer, metaJson] = await Promise.all([
-        decryptBytes(key, cipherBuffer, msg.attachment.fileIv),
-        decryptText(key, msg.attachment.metaCiphertext, msg.attachment.metaIv),
-      ]);
-      const meta = JSON.parse(metaJson);
-
-      const blob = new Blob([plainBuffer], { type: meta.mimeType || 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(blob);
-      this.chat.renderDecryptedAttachment(wrapEl, { blobUrl, filename: meta.filename, isImage: !!meta.isImage });
-    } catch (err) {
-      console.error('Attachment decrypt failed:', err);
-      this.chat.showAttachmentError(wrapEl, 'Could not decrypt this attachment.');
-    }
-  }
-
-  // -------------------------------------------------------------------
-  // Composer: encrypt locally, then send
+  // Composer
   // -------------------------------------------------------------------
 
   wireComposer() {
@@ -195,7 +414,7 @@ export class ChatController {
       const file = fileInput.files[0];
       if (!file) return;
       this.pendingFile = file;
-      $('#attachment-preview-name').textContent = file.name;
+      $('#attachment-preview-name').textContent = `${file.name} · ${formatFileSize(file.size)}`;
       $('#attachment-preview').classList.remove('hidden');
     });
 
@@ -232,7 +451,8 @@ export class ChatController {
   async handleSend(e) {
     e.preventDefault();
     const chatId = this.state.activeChatId;
-    if (!chatId) return;
+    const chat = this.state.chats.get(chatId);
+    if (!chatId || !chat) return;
 
     const input = $('#message-input');
     const content = input.value.trim();
@@ -243,24 +463,25 @@ export class ChatController {
     sendBtn.disabled = true;
 
     try {
-      const chat = this.state.chats.get(chatId);
-      const key = await getChatKey(chat, this.keyPair, this.state.currentUser.id);
+      const payload = { chatId };
 
-      let ciphertext = null;
-      let iv = null;
-      if (content) {
-        const encrypted = await encryptText(key, content);
-        ciphertext = encrypted.ciphertext;
-        iv = encrypted.iv;
-      }
+      if (chat.isSecret) {
+        await this.ensureIdentity();
+        const key = await getSecretChatKey(chat, this.myIdentity.keyPair, this.state.currentUser.id);
 
-      let attachment = null;
-      if (file) {
-        attachment = await this.encryptAndUploadFile(file, key);
+        if (content) {
+          const encrypted = await encryptText(key, content);
+          payload.ciphertext = encrypted.ciphertext;
+          payload.iv = encrypted.iv;
+        }
+        if (file) payload.attachment = await this.encryptAndUploadFile(file, key);
+      } else {
+        if (content) payload.content = content;
+        if (file) payload.attachment = await this.uploadPlainFile(file);
       }
 
       await new Promise((resolve, reject) => {
-        this.socket.emit('send-message', { chatId, ciphertext, iv, attachment }, (ack) => {
+        this.socket.emit('send-message', payload, (ack) => {
           if (ack && ack.error) reject(new Error(ack.error));
           else resolve();
         });
@@ -280,25 +501,6 @@ export class ChatController {
     }
   }
 
-  // Encrypts the file's bytes AND its filename/type (as a small separate
-  // ciphertext) before it ever leaves the browser, then uploads only
-  // opaque bytes plus opaque metadata.
-  async encryptAndUploadFile(file, key) {
-    const fileBuffer = await file.arrayBuffer();
-    const { ciphertext: fileCipher, iv: fileIv } = await encryptBytes(key, fileBuffer);
-
-    const meta = { filename: file.name, mimeType: file.type, isImage: file.type.startsWith('image/') };
-    const { ciphertext: metaCiphertext, iv: metaIv } = await encryptText(key, JSON.stringify(meta));
-
-    const form = new FormData();
-    form.append('file', new Blob([fileCipher], { type: 'application/octet-stream' }), 'encrypted.bin');
-    form.append('fileIv', fileIv);
-    form.append('metaCiphertext', metaCiphertext);
-    form.append('metaIv', metaIv);
-
-    return api.postForm('/api/upload', form);
-  }
-
   // -------------------------------------------------------------------
   // Socket events
   // -------------------------------------------------------------------
@@ -310,7 +512,11 @@ export class ChatController {
 
       if (msg.chatId === this.state.activeChatId) {
         try {
-          const key = await getChatKey(chat, this.keyPair, this.state.currentUser.id);
+          let key = null;
+          if (chat.isSecret) {
+            await this.ensureIdentity();
+            key = await getSecretChatKey(chat, this.myIdentity.keyPair, this.state.currentUser.id);
+          }
           this.chat.appendMessage(await this.buildBubbleFor(msg, chat, key));
         } catch (err) {
           console.error('Failed to render incoming message:', err);
@@ -355,10 +561,23 @@ export class ChatController {
   }
 
   // -------------------------------------------------------------------
-  // "New chat" / "New group" modals
+  // "New chat" / "New secret chat" / "New group" modals
   // -------------------------------------------------------------------
 
   wireModals() {
+    // Both the "New direct chat" and "New secret chat" buttons open the
+    // same modal (see ModalView's generic [data-open-modal] handler) —
+    // this just also records which kind of chat this trip through the
+    // modal will create.
+    document.querySelectorAll('[data-open-modal="new-chat-modal"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.chatModalMode = btn.dataset.mode || 'cloud';
+        const isSecret = this.chatModalMode === 'secret';
+        $('#new-chat-modal-title').textContent = isSecret ? 'New secret chat' : 'New direct chat';
+        $('#new-chat-modal-hint').classList.toggle('hidden', !isSecret);
+      });
+    });
+
     this.debouncedUserSearch($('#user-search-input'), (users) => {
       this.modal.renderUserSearchResults(users, (user) => this.startPrivateChat(user));
     });
@@ -404,8 +623,10 @@ export class ChatController {
   }
 
   async startPrivateChat(user) {
+    const isSecret = this.chatModalMode === 'secret';
     try {
-      const chat = await api.post('/api/chats/private', { username: user.username });
+      if (isSecret) await this.ensureIdentity(); // make sure WE have a key before attempting a secret chat
+      const chat = await api.post('/api/chats/private', { username: user.username, isSecret });
       this.state.upsertChat(chat);
       this.socket.emit('join-chat', { chatId: chat.id });
       this.modal.closeNewChatModal();
@@ -415,20 +636,15 @@ export class ChatController {
     }
   }
 
+  // Groups are always Cloud Chats — see server/controllers/chatController.js.
   async createGroup() {
     const name = $('#group-name-input').value.trim();
     if (!name) return alert('Give the group a name first.');
     if (this.groupSelected.size === 0) return alert('Add at least one member.');
 
     try {
-      const members = [
-        ...this.groupSelected.values(),
-        { username: this.state.currentUser.username, publicKey: this.state.currentUser.publicKey },
-      ];
-      const { groupKey, wrapperPublicKey, keyWraps } = await createGroupKeyWraps(this.keyPair, members);
-
-      const chat = await api.post('/api/chats/group', { name, wrapperPublicKey, keyWraps });
-      cacheChatKey(chat.id, groupKey);
+      const usernames = Array.from(this.groupSelected.keys());
+      const chat = await api.post('/api/chats/group', { name, usernames });
 
       this.state.upsertChat(chat);
       this.socket.emit('join-chat', { chatId: chat.id });

@@ -7,7 +7,6 @@ export class AppState extends EventTarget {
   constructor() {
     super();
     this.currentUser = null;
-    this.myKeyPair = null; // { publicKey, privateKey } CryptoKey objects
     this.chats = new Map(); // chatId -> chat object
     this.activeChatId = null;
   }
@@ -15,10 +14,6 @@ export class AppState extends EventTarget {
   setCurrentUser(user) {
     this.currentUser = user;
     this.emit('user:changed', user);
-  }
-
-  setKeyPair(keyPair) {
-    this.myKeyPair = keyPair;
   }
 
   setChats(chatList) {

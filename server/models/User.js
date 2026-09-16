@@ -32,9 +32,11 @@ const userSchema = new mongoose.Schema(
       default: Date.now,
     },
     // Base64-encoded SPKI export of the user's ECDH (P-256) public key.
-    // This is the ONLY key material the server ever sees — the matching
-    // private key is generated and stored client-side and never leaves
-    // the browser. See client/src/crypto/webcrypto.js.
+    // Only ever needed for Secret Chats (see models/Chat.js) — Cloud
+    // Chats don't use client-side encryption at all, so most accounts
+    // may never populate this. Safe to be fully public: anyone can use it
+    // to encrypt something to this user, but it reveals nothing about
+    // their private key, which never leaves their device.
     publicKey: {
       type: String,
       default: null,

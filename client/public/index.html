@@ -64,9 +64,12 @@
           <button id="new-menu-btn" class="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors" title="Start something new">
             <i class="fa-solid fa-plus text-sm"></i>
           </button>
-          <div id="new-menu" class="hidden absolute right-0 mt-2 w-48 bg-white text-ink rounded-xl shadow-lg border border-black/5 overflow-hidden z-20">
-            <button data-open-modal="new-chat-modal" class="w-full text-left px-4 py-2.5 text-sm hover:bg-mist flex items-center gap-2.5">
+          <div id="new-menu" class="hidden absolute right-0 mt-2 w-52 bg-white text-ink rounded-xl shadow-lg border border-black/5 overflow-hidden z-20">
+            <button data-open-modal="new-chat-modal" data-mode="cloud" class="w-full text-left px-4 py-2.5 text-sm hover:bg-mist flex items-center gap-2.5">
               <i class="fa-solid fa-user-plus text-slate w-4"></i> New direct chat
+            </button>
+            <button data-open-modal="new-chat-modal" data-mode="secret" class="w-full text-left px-4 py-2.5 text-sm hover:bg-mist flex items-center gap-2.5">
+              <i class="fa-solid fa-user-secret text-harmony w-4"></i> New secret chat
             </button>
             <button data-open-modal="new-group-modal" class="w-full text-left px-4 py-2.5 text-sm hover:bg-mist flex items-center gap-2.5">
               <i class="fa-solid fa-users text-slate w-4"></i> New group
@@ -106,9 +109,9 @@
 
       <!-- Empty state -->
       <div id="empty-state" class="flex-1 flex flex-col items-center justify-center text-center px-6">
-        <i class="fa-solid fa-lock text-4xl text-ink/15 mb-4"></i>
+        <i class="fa-solid fa-comments text-4xl text-ink/15 mb-4"></i>
         <p class="font-display text-lg text-ink/70 font-medium">Pick a conversation, or start one</p>
-        <p class="text-slate text-sm mt-1 max-w-xs">Every message is encrypted in your browser before it ever leaves — even we can't read them.</p>
+        <p class="text-slate text-sm mt-1 max-w-xs">Cloud chats sync everywhere you log in. Start a secret chat for end-to-end encryption.</p>
       </div>
 
       <!-- Active chat -->
@@ -146,7 +149,7 @@
             <input id="file-input" type="file" class="hidden" />
           </label>
           <textarea
-            id="message-input" rows="1" placeholder="Write an encrypted message"
+            id="message-input" rows="1" placeholder="Write a message"
             class="flex-1 resize-none max-h-32 rounded-xl border border-black/10 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal"
           ></textarea>
           <button type="submit" class="w-10 h-10 shrink-0 rounded-full bg-signal hover:bg-signal-dark text-ink flex items-center justify-center transition-colors" title="Send message">
@@ -157,14 +160,18 @@
     </main>
   </div>
 
-  <!-- ============ New direct chat modal ============ -->
+  <!-- ============ New direct / secret chat modal (shared; mode set by JS) ============ -->
   <div id="new-chat-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="font-display font-semibold text-lg">New direct chat</h2>
+      <div class="flex items-center justify-between mb-1">
+        <h2 id="new-chat-modal-title" class="font-display font-semibold text-lg">New direct chat</h2>
         <button data-close-modal class="text-slate hover:text-ink"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div class="relative mb-3">
+      <p id="new-chat-modal-hint" class="hidden text-xs text-slate mb-3">
+        <i class="fa-solid fa-lock text-harmony mr-1"></i>
+        End-to-end encrypted, and only available on this device. They'll need to have opened a secret chat before.
+      </p>
+      <div class="relative mb-3 mt-3">
         <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate/50 text-xs"></i>
         <input id="user-search-input" type="text" placeholder="Search by username"
           class="w-full border border-black/10 rounded-lg pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal" />

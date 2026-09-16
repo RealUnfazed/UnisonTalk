@@ -62,25 +62,28 @@ async function handleConnection(io, socket) {
     if (chatId) socket.to(chatId).emit('stop-typing', { chatId, userId });
   });
 
-  // Note what this handler does NOT do: it never looks at, validates, or
-  // logs the actual message text. `ciphertext`/`iv` (and the attachment's
-  // `metaCiphertext`) arrive already encrypted from the browser and are
-  // stored exactly as received. The server's only job is routing bytes to
-  // the right room — the diagram in the README is literally this function.
-  socket.on('send-message', async ({ chatId, ciphertext, iv, attachment } = {}, ack) => {
+  // For a Cloud Chat, `content` is plain text the server actually stores
+  // and can read (like any normal chat app). For a Secret Chat,
+  // `ciphertext`/`iv` (and the attachment's `metaCiphertext`) arrive
+  // already encrypted from the browser and are stored exactly as
+  // received — this handler never sees the real text for those.
+  socket.on('send-message', async ({ chatId, content, ciphertext, iv, attachment } = {}, ack) => {
     try {
-      if (!chatId || (!ciphertext && !attachment)) {
-        return ack?.({ error: 'Message needs text or an attachment' });
-      }
-
       const chat = await Chat.findOne({ _id: chatId, participants: userId });
       if (!chat) return ack?.({ error: 'Not a participant of that chat' });
+
+      const trimmedContent = (content || '').trim();
+      const hasPayload = chat.isSecret ? ciphertext || attachment : trimmedContent || attachment;
+      if (!chatId || !hasPayload) {
+        return ack?.({ error: 'Message needs text or an attachment' });
+      }
 
       let message = await Message.create({
         chat: chatId,
         sender: userId,
-        ciphertext: ciphertext || undefined,
-        iv: ciphertext ? iv : undefined,
+        content: !chat.isSecret && trimmedContent ? trimmedContent : undefined,
+        ciphertext: chat.isSecret && ciphertext ? ciphertext : undefined,
+        iv: chat.isSecret && ciphertext ? iv : undefined,
         attachment: attachment || undefined,
       });
       message = await message.populate('sender', 'username');

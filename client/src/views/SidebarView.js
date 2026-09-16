@@ -43,9 +43,13 @@ export class SidebarView {
       avatarWrap.appendChild(dot);
     }
 
-    const nameRow = el('div', 'flex items-center justify-between gap-2', [
-      el('p', 'text-sm font-medium truncate', chat.name),
-    ]);
+    const nameEl = el('p', 'text-sm font-medium truncate flex items-center gap-1');
+    if (chat.isSecret) {
+      nameEl.appendChild(Object.assign(document.createElement('i'), { className: 'fa-solid fa-lock text-harmony text-[10px]' }));
+    }
+    nameEl.appendChild(document.createTextNode(chat.name));
+
+    const nameRow = el('div', 'flex items-center justify-between gap-2', [nameEl]);
     if (chat.lastMessage) {
       nameRow.appendChild(el('span', 'text-[11px] text-white/40 shrink-0', formatRelative(chat.lastMessage.createdAt)));
     }

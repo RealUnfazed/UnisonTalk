@@ -6,7 +6,6 @@ const { serializeChat, serializeMessage, serializeUser } = require('../utils/ser
 
 const CHAT_POPULATE = [
   { path: 'participants', select: 'username isOnline lastSeen publicKey' },
-  { path: 'groupKeyWraps.user', select: '_id' },
   { path: 'lastMessage', populate: { path: 'sender', select: 'username' } },
 ];
 
@@ -18,13 +17,17 @@ async function listChats(req, res) {
   res.json(chats.map((c) => serializeChat(c, req.session.userId)));
 }
 
-// Find-or-create a 1:1 chat with another user by username. No key
-// wrapping needed here — both sides can independently derive the same
-// ECDH shared key from each other's public key whenever they open the
-// chat, so there's nothing extra for the server to store.
+// Find-or-create a 1:1 chat with another user by username. `isSecret`
+// picks which of the two conversation types this is:
+//   false (default) -> a Cloud Chat: no key requirements at all, works
+//                       immediately, syncs across every device on login.
+//   true             -> a Secret Chat: genuinely end-to-end encrypted,
+//                       requires the other person to have a Secret Chat
+//                       public key on file already (they get one
+//                       automatically the first time they open/start one).
 async function createPrivateChat(req, res) {
   try {
-    const { username } = req.body;
+    const { username, isSecret } = req.body;
     if (!username) return res.status(400).json({ error: 'username is required' });
 
     const other = await User.findOne({ username: username.trim() });
@@ -32,20 +35,25 @@ async function createPrivateChat(req, res) {
     if (other._id.toString() === req.session.userId) {
       return res.status(400).json({ error: "You can't start a chat with yourself" });
     }
-    if (!other.publicKey) {
+    if (isSecret && !other.publicKey) {
       return res.status(409).json({
-        error: `${other.username} hasn't set up encryption yet — ask them to log in once first.`,
+        error: `${other.username} hasn't opened a Secret Chat before — ask them to start one with you first, or send a Secret Chat request another way.`,
       });
     }
 
     let chat = await Chat.findOne({
       isGroup: false,
+      isSecret: !!isSecret,
       participants: { $all: [req.session.userId, other._id], $size: 2 },
     }).populate(CHAT_POPULATE);
 
     let created = false;
     if (!chat) {
-      chat = await Chat.create({ isGroup: false, participants: [req.session.userId, other._id] });
+      chat = await Chat.create({
+        isGroup: false,
+        isSecret: !!isSecret,
+        participants: [req.session.userId, other._id],
+      });
       chat = await chat.populate(CHAT_POPULATE);
       created = true;
     }
@@ -64,58 +72,38 @@ async function createPrivateChat(req, res) {
   }
 }
 
-// Create a group chat. The client has already generated a random AES-GCM
-// group key and wrapped (encrypted) a copy of it for every member —
-// including itself — using an ECDH-derived key shared with each member.
-// This endpoint just resolves usernames to accounts and stores those
-// opaque wrapped copies; it never sees the raw group key.
+// Group chats are always Cloud Chats — there's no single "other party" to
+// do a Diffie-Hellman exchange with, so real end-to-end-encrypted group
+// messaging needs per-member key distribution (Signal's "sender keys," or
+// similar). That's meaningfully more complex and out of scope here; see
+// CONTRIBUTING.md's "good first issues" if you'd like to build it.
 async function createGroupChat(req, res) {
   try {
-    const { name, wrapperPublicKey, keyWraps } = req.body;
-
-    if (!name || !wrapperPublicKey || !Array.isArray(keyWraps) || keyWraps.length < 2) {
-      return res.status(400).json({
-        error: 'name, wrapperPublicKey, and keyWraps for at least yourself + one member are required',
-      });
+    const { name, usernames } = req.body;
+    if (!name || !Array.isArray(usernames) || usernames.length === 0) {
+      return res.status(400).json({ error: 'name and at least one member are required' });
     }
 
-    const usernames = keyWraps.map((w) => w.username);
-    const users = await User.find({ username: { $in: usernames } });
-    const userByUsername = new Map(users.map((u) => [u.username, u]));
+    const members = await User.find({ username: { $in: usernames } });
+    const memberIds = members.map((m) => m._id);
+    const participantSet = new Set([req.session.userId, ...memberIds.map((id) => id.toString())]);
 
-    const missing = usernames.filter((u) => !userByUsername.has(u));
-    if (missing.length > 0) {
-      return res.status(404).json({ error: `Unknown username(s): ${missing.join(', ')}` });
+    if (participantSet.size < 2) {
+      return res.status(400).json({ error: 'Add at least one other valid member' });
     }
-
-    const selfIncluded = users.some((u) => u._id.toString() === req.session.userId);
-    if (!selfIncluded) {
-      return res.status(400).json({
-        error: 'Your own wrapped copy of the group key is missing — include yourself in keyWraps.',
-      });
-    }
-
-    const groupKeyWraps = keyWraps.map((w) => ({
-      user: userByUsername.get(w.username)._id,
-      wrappedKey: w.wrappedKey,
-      iv: w.iv,
-      wrapperPublicKey,
-    }));
 
     let chat = await Chat.create({
       isGroup: true,
+      isSecret: false,
       name: name.trim(),
-      participants: groupKeyWraps.map((w) => w.user),
+      participants: Array.from(participantSet),
       admin: req.session.userId,
-      groupKeyWraps,
     });
     chat = await chat.populate(CHAT_POPULATE);
     const serialized = serializeChat(chat.toObject(), req.session.userId);
 
     const io = req.app.get('io');
-    users
-      .filter((u) => u._id.toString() !== req.session.userId)
-      .forEach((u) => io.to(`user:${u._id}`).emit('chat-created', serialized));
+    memberIds.forEach((id) => io.to(`user:${id}`).emit('chat-created', serialized));
 
     res.status(201).json(serialized);
   } catch (err) {
@@ -125,8 +113,8 @@ async function createGroupChat(req, res) {
 }
 
 // Cursor-paginated history, newest page first, returned in chronological
-// order. Every message comes back as ciphertext + IV (plus encrypted
-// attachment metadata, if any) — decryption happens entirely client-side.
+// order. For Cloud Chats this is plain text; for Secret Chats it's
+// ciphertext — see models/Message.js.
 async function getMessages(req, res) {
   const { chatId } = req.params;
   const { before, limit = 30 } = req.query;
