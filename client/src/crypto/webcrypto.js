@@ -1,28 +1,29 @@
-// All real cryptography lives in this one file, built entirely on the
-// browser's native Web Crypto API (window.crypto.subtle) — no third-party
-// crypto library, nothing to `npm install` on the client, nothing that
-// could silently downgrade to a fake/no-op implementation.
+// All real cryptography for Secret Chats lives in this one file, built
+// entirely on the browser's native Web Crypto API (window.crypto.subtle)
+// — no third-party crypto library, nothing to `npm install` on the
+// client, nothing that could silently downgrade to a fake/no-op
+// implementation.
 //
-// The scheme, in one paragraph: every user has a long-term ECDH (P-256)
-// key pair. For a private chat, both participants independently derive
-// the *same* AES-256-GCM key from (my private key, their public key) —
-// that's the Diffie-Hellman property: the two computations land on the
-// same shared secret without either side ever transmitting it. For a
-// group chat, there's no single pair to derive from, so instead a random
-// AES-256-GCM "group key" is generated once and a copy of it is
-// encrypted ("wrapped") individually for each member using that same
-// ECDH-derived trick — see crypto/chatKeys.js for that part. Either way,
-// only ciphertext + a public key directory ever reaches the server.
+// This is only ever used for Secret Chats. Cloud Chats (the default —
+// see models/Chat.js) don't touch this file at all; their messages are
+// plain text, stored and synced server-side like any normal chat app.
+//
+// The Secret Chat scheme, in one paragraph: every user who's ever opened
+// a Secret Chat has a long-term ECDH (P-256) key pair, generated and kept
+// entirely in that browser (see crypto/keyStore.js). For a Secret Chat
+// between Alice and Bob, both independently derive the *same*
+// AES-256-GCM key from (their own private key, the other's public key)
+// — that's the Diffie-Hellman property: the two computations land on the
+// same shared secret without either side ever transmitting it.
 //
 // Known simplifications vs. a protocol like Signal (disclosed honestly,
 // not hidden): no forward secrecy or key ratcheting (a compromised key
-// exposes all past messages encrypted with it), no out-of-band safety
-// number verification (so a server that actively lied about someone's
-// public key could man-in-the-middle a conversation — this protects
-// against a server that passively logs traffic, not one that's fully
-// hostile and interactive), and no multi-device sync (a new browser means
-// a new key pair, which can't decrypt anything encrypted under the old
-// one). See README.md's "Security model" section.
+// exposes every past message encrypted under it), and no out-of-band
+// safety-number verification (so a server that actively lied about
+// someone's public key could, in principle, sit in the middle of a
+// conversation — this protects against a server that passively logs
+// traffic, not one that's fully hostile and interactive). See README.md's
+// "Security model" section.
 
 const ECDH_ALGO = { name: 'ECDH', namedCurve: 'P-256' };
 const AES_ALGO = { name: 'AES-GCM', length: 256 };
@@ -51,15 +52,15 @@ function randomIv() {
 }
 
 // ---------------------------------------------------------------------
-// Identity key pairs (long-term ECDH keys, one per user)
+// Identity key pairs (long-term ECDH keys, one per user, Secret-Chat-only)
 // ---------------------------------------------------------------------
 
-// `extractable: true` on both keys of the pair is a deliberate, documented
-// trade-off: Web Crypto applies one extractability flag to the whole pair,
-// and we need to export the *public* half to upload it. We simply never
-// call exportKey on the private half in application code — see
-// crypto/keyStore.js, which persists the CryptoKey object itself (IndexedDB
-// supports storing CryptoKey directly) rather than raw exported bytes.
+// `extractable: true` on both keys of the pair is a deliberate trade-off:
+// Web Crypto applies one extractability flag to the whole pair, and we
+// need to export both halves — the public key to upload, and the private
+// key to persist locally (see crypto/keyStore.js, which stores portable
+// exported bytes rather than trusting browsers' CryptoKey structured-clone
+// support, which has had inconsistent behavior).
 export async function generateIdentityKeyPair() {
   return crypto.subtle.generateKey(ECDH_ALGO, true, ['deriveKey', 'deriveBits']);
 }
@@ -71,6 +72,15 @@ export async function exportPublicKeyB64(publicKey) {
 
 export async function importPublicKeyB64(b64) {
   return crypto.subtle.importKey('spki', b64ToBuf(b64), ECDH_ALGO, true, []);
+}
+
+export async function exportPrivateKeyB64(privateKey) {
+  const raw = await crypto.subtle.exportKey('pkcs8', privateKey);
+  return bufToB64(raw);
+}
+
+export async function importPrivateKeyB64(b64) {
+  return crypto.subtle.importKey('pkcs8', b64ToBuf(b64), ECDH_ALGO, true, ['deriveKey', 'deriveBits']);
 }
 
 // The core Diffie-Hellman step: combine my private key with someone else's
@@ -85,25 +95,6 @@ export async function deriveSharedAesKey(myPrivateKey, theirPublicKey) {
     false,
     ['encrypt', 'decrypt']
   );
-}
-
-// ---------------------------------------------------------------------
-// Symmetric (AES-256-GCM) keys — used directly for private chats (via
-// deriveSharedAesKey above) and generated fresh for group chats.
-// ---------------------------------------------------------------------
-
-// `extractable: true` here is required so the raw bytes can be wrapped
-// (encrypted) individually for each group member — see chatKeys.js.
-export async function generateGroupKey() {
-  return crypto.subtle.generateKey(AES_ALGO, true, ['encrypt', 'decrypt']);
-}
-
-export async function exportRawKey(key) {
-  return crypto.subtle.exportKey('raw', key);
-}
-
-export async function importRawKey(rawBytes, extractable = false) {
-  return crypto.subtle.importKey('raw', rawBytes, AES_ALGO, extractable, ['encrypt', 'decrypt']);
 }
 
 // ---------------------------------------------------------------------
@@ -140,24 +131,5 @@ export async function decryptBytes(key, ciphertextBuffer, ivB64) {
     { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(ivB64)) },
     key,
     ciphertextBuffer
-  );
-}
-
-// ---------------------------------------------------------------------
-// Key wrapping — encrypting one key's raw bytes with another key, used to
-// hand a group's shared AES key to each member individually.
-// ---------------------------------------------------------------------
-
-export async function wrapRawKeyBytes(rawKeyBytes, wrappingKey) {
-  const iv = randomIv();
-  const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, rawKeyBytes);
-  return { wrappedKey: bufToB64(wrapped), iv: bufToB64(iv) };
-}
-
-export async function unwrapRawKeyBytes(wrappedKeyB64, ivB64, wrappingKey) {
-  return crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: new Uint8Array(b64ToBuf(ivB64)) },
-    wrappingKey,
-    b64ToBuf(wrappedKeyB64)
   );
 }

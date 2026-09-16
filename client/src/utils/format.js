@@ -2,6 +2,13 @@ export function avatarFor(username) {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random&bold=true`;
 }
 
+export function formatFileSize(bytes) {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function formatClock(dateStr) {
   return new Date(dateStr).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }

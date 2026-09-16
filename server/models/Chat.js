@@ -6,6 +6,19 @@ const chatSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Two distinct kinds of conversation, deliberately — this is the
+    // Telegram-style split: a Cloud Chat is stored server-side like a
+    // normal chat app (instant multi-device access, no key management,
+    // no way to lose history by losing a device), while a Secret Chat is
+    // genuinely end-to-end encrypted (the server only ever sees
+    // ciphertext) at the cost of being tied to the device(s) that were
+    // present when it was used. Secret Chats are always 1:1 — real
+    // Telegram doesn't offer secret groups either, since there's no
+    // single "other party" to Diffie-Hellman with.
+    isSecret: {
+      type: Boolean,
+      default: false,
+    },
     // Only used for group chats. Private chats are labelled client-side
     // using "the other participant's" username instead.
     name: {
@@ -28,23 +41,6 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Message',
     },
-    // Group chats need one shared symmetric key so every member can read
-    // every message, but the server must never see that key in the clear.
-    // Instead, the chat creator encrypts ("wraps") a copy of the raw group
-    // key individually for each member, using an ECDH-derived key shared
-    // only between the creator and that member. The server just stores
-    // these opaque, per-member wrapped copies — it cannot unwrap any of
-    // them itself. Private (1:1) chats don't need this: both sides can
-    // independently derive the same shared key on demand from each
-    // other's public key, so nothing extra needs to be stored.
-    groupKeyWraps: [
-      {
-        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-        wrappedKey: { type: String, required: true }, // base64 AES-GCM ciphertext of the raw group key
-        iv: { type: String, required: true }, // base64, unique per wrap
-        wrapperPublicKey: { type: String, required: true }, // creator's public key at wrap time, so the member can re-derive the same ECDH secret
-      },
-    ],
   },
   { timestamps: true }
 );

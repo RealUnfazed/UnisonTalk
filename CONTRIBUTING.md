@@ -73,9 +73,9 @@ Keep them short and in the imperative mood ("Add typing indicator timeout", not 
 
 If you're looking for a place to start, these are areas the project could use help with:
 
-- Group re-keying: a way to rotate a group's key and re-wrap it for the current member list (needed before "remove member" or "add member" could be added safely)
-- Multi-device support (linking a second browser to an existing identity, rather than generating a brand-new key pair)
-- A read-receipt / unread-count system (`Message` would need a `readBy` array, plus a socket event or two)
+- End-to-end encrypted group chats (Secret Chats are 1:1 only right now — this needs per-member key distribution, e.g. something like Signal's "sender keys"; a meaningfully bigger undertaking than most items here)
+- Multi-device support for Secret Chats (linking a second browser to an existing Secret Chat identity, rather than that browser generating a brand-new key pair — see the "Security model" section in the README for why this is currently a limitation)
+- A read-receipt / unread-count system (`Message` would need a `readBy` array, plus a socket event or two) — for Cloud Chats this is straightforward; for Secret Chats it needs some thought about what metadata is safe to leave unencrypted
 - Swapping local-disk attachment storage for S3-compatible storage
 - An automated test suite (currently none exists) — the crypto module (`client/src/crypto/`) especially would benefit from unit tests that verify encrypt→decrypt round-trips
 - Accessibility passes on the chat UI (keyboard navigation, screen reader labels)

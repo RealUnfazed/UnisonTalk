@@ -1,12 +1,18 @@
 const mongoose = require('mongoose');
 
-// Every field here that could reveal what was actually said is
-// ciphertext-only. The server (and MongoDB itself) never has the keys
-// needed to read `ciphertext`, `attachment.metaCiphertext`, or the bytes
-// stored on disk at `attachment.url` — those are all encrypted client-side
-// before this document is ever created. See client/src/crypto/webcrypto.js
-// for the encryption side and server/sockets/index.js for confirmation
-// that the server only ever stores what it's given, untouched.
+// A message belongs to exactly one chat, and that chat's `isSecret` flag
+// decides which of the two shapes below gets used:
+//
+//   Cloud chat message:  content is plain text, attachment has a real
+//                         filename/mimeType. Stored and readable server-side,
+//                         same as any normal chat app (Slack, Discord, etc).
+//
+//   Secret chat message: content is null; ciphertext+iv hold AES-GCM
+//                         ciphertext of the text, encrypted entirely
+//                         client-side. attachment.metaCiphertext holds the
+//                         (also encrypted) real filename/mimeType. The
+//                         server stores these fields but has no way to
+//                         read them — see client/src/crypto/webcrypto.js.
 const messageSchema = new mongoose.Schema(
   {
     chat: {
@@ -19,30 +25,37 @@ const messageSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // Base64 AES-GCM ciphertext of the message text. Empty/omitted for a
-    // message that's attachment-only.
+
+    // --- Cloud chat fields ---
+    content: {
+      type: String,
+      trim: true,
+      maxlength: 4000,
+      default: null,
+    },
+
+    // --- Secret chat fields ---
     ciphertext: {
       type: String,
       default: null,
     },
-    // Base64 IV used for `ciphertext`. A fresh random IV per message —
-    // never reused with the same key.
     iv: {
       type: String,
       default: null,
     },
+
     attachment: {
-      // Path to the *encrypted* file bytes on disk. The server stores
-      // whatever ciphertext it's handed; it has no idea what's inside.
       url: String,
-      // Base64 IV used to encrypt the file bytes.
+      // Cloud chat attachment metadata (plain):
+      filename: String,
+      mimeType: String,
+      isImage: Boolean,
+      size: Number,
+      // Secret chat attachment metadata (encrypted client-side):
       fileIv: String,
-      // The real filename and MIME type are also encrypted (as a small
-      // JSON blob) rather than stored in the clear — otherwise the server
-      // would learn "this is a .pdf called payroll.pdf" even without
-      // reading its contents.
       metaCiphertext: String,
       metaIv: String,
+      _id: false,
     },
   },
   { timestamps: true }
