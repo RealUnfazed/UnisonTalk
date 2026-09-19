@@ -3,16 +3,22 @@ const mongoose = require('mongoose');
 // A message belongs to exactly one chat, and that chat's `isSecret` flag
 // decides which of the two shapes below gets used:
 //
-//   Cloud chat message:  content is plain text, attachment has a real
-//                         filename/mimeType. Stored and readable server-side,
-//                         same as any normal chat app (Slack, Discord, etc).
+//   Cloud chat message:  `content` holds AES-256-GCM ciphertext, encrypted
+//                         at rest with a server-held key (see
+//                         utils/fieldCrypto.js) — the server decrypts it
+//                         on every read, so this is invisible to the API
+//                         and the client (they always see plain text).
+//                         What it protects against is a raw database dump
+//                         or stolen backup: without CLOUD_ENCRYPTION_KEY
+//                         (deliberately kept out of the database, in the
+//                         environment only), `content` is unreadable.
+//                         attachment.filename gets the same treatment.
 //
 //   Secret chat message: content is null; ciphertext+iv hold AES-GCM
 //                         ciphertext of the text, encrypted entirely
-//                         client-side. attachment.metaCiphertext holds the
-//                         (also encrypted) real filename/mimeType. The
-//                         server stores these fields but has no way to
-//                         read them — see client/src/crypto/webcrypto.js.
+//                         client-side — the server never has the key for
+//                         these at all, not even in memory. See
+//                         client/src/crypto/webcrypto.js.
 const messageSchema = new mongoose.Schema(
   {
     chat: {
@@ -26,15 +32,17 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
 
-    // --- Cloud chat fields ---
+    // --- Cloud chat fields (encrypted at rest, decrypted server-side) ---
     content: {
       type: String,
-      trim: true,
-      maxlength: 4000,
+      default: null,
+    },
+    contentIv: {
+      type: String,
       default: null,
     },
 
-    // --- Secret chat fields ---
+    // --- Secret chat fields (encrypted client-side; server never decrypts) ---
     ciphertext: {
       type: String,
       default: null,
@@ -46,8 +54,11 @@ const messageSchema = new mongoose.Schema(
 
     attachment: {
       url: String,
-      // Cloud chat attachment metadata (plain):
+      // Cloud chat attachment metadata — filename is encrypted at rest
+      // the same way `content` is; mimeType/isImage/size are left plain
+      // since they're low-sensitivity and useful for quick filtering.
       filename: String,
+      filenameIv: String,
       mimeType: String,
       isImage: Boolean,
       size: Number,

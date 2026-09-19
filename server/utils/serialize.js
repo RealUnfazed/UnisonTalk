@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { decryptField } = require('./fieldCrypto');
 
 function serializeUser(user) {
   if (!user) return null;
@@ -39,18 +40,43 @@ function serializeChat(chat, currentUserId) {
   };
 }
 
+// Cloud Chat text (message content, attachment filenames) is encrypted at
+// rest (see utils/fieldCrypto.js) but the API always hands back plaintext
+// — decryption happens here, once, on the way out. `iv` missing while
+// `ciphertext` is present means this was written before encryption-at-rest
+// existed; treat it as already-plaintext rather than failing to decrypt it.
+function decryptCloudText(ciphertext, iv) {
+  if (!ciphertext) return null;
+  if (!iv) return ciphertext;
+  try {
+    return decryptField(ciphertext, iv);
+  } catch (err) {
+    console.error('[serialize] failed to decrypt a cloud field:', err.message);
+    return '[This message could not be decrypted]';
+  }
+}
+
 function serializeMessage(message) {
+  const hasAttachment = message.attachment && message.attachment.url;
+  let attachment = null;
+  if (hasAttachment) {
+    attachment = { ...message.attachment };
+    if (attachment.filename) attachment.filename = decryptCloudText(attachment.filename, attachment.filenameIv);
+    delete attachment.filenameIv;
+  }
+
   return {
     id: message._id.toString(),
     chatId: message.chat._id ? message.chat._id.toString() : message.chat.toString(),
     sender: message.sender._id ? serializeUser(message.sender) : { id: message.sender.toString() },
-    // Cloud chats populate `content`; Secret chats populate
-    // `ciphertext`/`iv` instead. A given message only ever has one pair
-    // populated, matching its chat's mode.
-    content: message.content || null,
+    // Cloud chats populate `content` (encrypted at rest, decrypted here);
+    // Secret chats populate `ciphertext`/`iv` instead, which the server
+    // never decrypts — only the recipient's browser can. A given message
+    // only ever has one pair populated, matching its chat's mode.
+    content: decryptCloudText(message.content, message.contentIv),
     ciphertext: message.ciphertext || null,
     iv: message.iv || null,
-    attachment: message.attachment && message.attachment.url ? message.attachment : null,
+    attachment,
     createdAt: message.createdAt,
   };
 }

@@ -6,10 +6,15 @@ const { Server } = require('socket.io');
 const connectDB = require('./config/db');
 const createApp = require('./app');
 const initSockets = require('./sockets');
+const { assertEncryptionKeyConfigured } = require('./utils/fieldCrypto');
 
 const PORT = process.env.PORT || 3000;
 
 async function main() {
+  // Fail loudly and immediately if Cloud Chat encryption isn't configured
+  // — much better than the first chat message mysteriously erroring out.
+  assertEncryptionKeyConfigured();
+
   await connectDB();
 
   const { app, sessionMiddleware } = createApp();
