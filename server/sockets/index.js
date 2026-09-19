@@ -1,8 +1,10 @@
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
-const { serializeMessage } = require('../utils/serialize');
+const { serializeMessage, serializeChat } = require('../utils/serialize');
 const { encryptField } = require('../utils/fieldCrypto');
+const { visibleToMe } = require('../utils/chatVisibility');
+const CHAT_POPULATE = require('../utils/chatPopulate');
 
 // Tracks how many open sockets/tabs each user currently has, so we only
 // flip someone to "offline" once their very last connection drops.
@@ -32,7 +34,7 @@ async function handleConnection(io, socket) {
   // group chat was created") to every tab they have open.
   socket.join(`user:${userId}`);
 
-  const myChats = await Chat.find({ participants: userId }).select('_id');
+  const myChats = await Chat.find({ participants: userId, ...visibleToMe(userId) }).select('_id');
   myChats.forEach((chat) => socket.join(chat._id.toString()));
 
   const sockets = onlineSocketsByUser.get(userId) || new Set();
@@ -84,6 +86,12 @@ async function handleConnection(io, socket) {
         return ack?.({ error: 'Message is too long (4000 characters max)' });
       }
 
+      // A brand-new private chat has no lastMessage yet, and (per
+      // chatController.createPrivateChat) is only visible to whoever
+      // created it — everyone else doesn't know it exists. This message
+      // is what changes that.
+      const isFirstMessageInPrivateChat = !chat.isGroup && !chat.lastMessage;
+
       const messageData = {
         chat: chatId,
         sender: userId,
@@ -112,6 +120,27 @@ async function handleConnection(io, socket) {
       // Bumps `updatedAt` via timestamps, which is what chat list sorting relies on.
       chat.lastMessage = message._id;
       await chat.save();
+
+      if (isFirstMessageInPrivateChat) {
+        await chat.populate(CHAT_POPULATE);
+        const chatObj = chat.toObject();
+        chat.participants
+          .filter((p) => p._id.toString() !== userId)
+          .forEach((p) => {
+            const recipientId = p._id.toString();
+            // Bring their already-connected sockets (any open tab) into
+            // this room now, server-side, so the new-message broadcast
+            // just below actually reaches them — their sockets never
+            // joined it at connection time, since the chat wasn't
+            // visible to them yet (see the room-join filter above).
+            io.in(`user:${recipientId}`).socketsJoin(chatId);
+            // Serialized per-recipient, not reused from the sender's own
+            // view — "the other participant's name" means something
+            // different depending on who's looking. Sending the same
+            // object to both sides was the original bug report here.
+            io.to(`user:${recipientId}`).emit('chat-created', serializeChat(chatObj, recipientId));
+          });
+      }
 
       const serialized = serializeMessage(message.toObject());
       // Broadcast to everyone in the room, including the sender's own other

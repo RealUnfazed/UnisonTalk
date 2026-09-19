@@ -3,14 +3,11 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const { serializeChat, serializeMessage, serializeUser } = require('../utils/serialize');
-
-const CHAT_POPULATE = [
-  { path: 'participants', select: 'username isOnline lastSeen publicKey' },
-  { path: 'lastMessage', populate: { path: 'sender', select: 'username' } },
-];
+const CHAT_POPULATE = require('../utils/chatPopulate');
+const { visibleToMe } = require('../utils/chatVisibility');
 
 async function listChats(req, res) {
-  const chats = await Chat.find({ participants: req.session.userId })
+  const chats = await Chat.find({ participants: req.session.userId, ...visibleToMe(req.session.userId) })
     .populate(CHAT_POPULATE)
     .sort({ updatedAt: -1 })
     .lean();
@@ -25,6 +22,14 @@ async function listChats(req, res) {
 //                       requires the other person to have a Secret Chat
 //                       public key on file already (they get one
 //                       automatically the first time they open/start one).
+//
+// Note what this does NOT do: notify the other participant right away.
+// They only find out once the first message is actually sent — see the
+// "first message" handling in sockets/index.js's send-message handler,
+// which is also what brings their socket into this chat's room. Until
+// then, this chat exists in the database (so the creator can type into
+// it right away) but is invisible to everyone else, including on refresh
+// (see utils/chatVisibility.js).
 async function createPrivateChat(req, res) {
   try {
     const { username, isSecret } = req.body;
@@ -53,18 +58,14 @@ async function createPrivateChat(req, res) {
         isGroup: false,
         isSecret: !!isSecret,
         participants: [req.session.userId, other._id],
+        admin: req.session.userId, // "who created this" — see utils/chatVisibility.js
       });
       chat = await chat.populate(CHAT_POPULATE);
       created = true;
     }
 
+    // No socket notification to `other` here — see the function comment.
     const serialized = serializeChat(chat.toObject(), req.session.userId);
-
-    if (created) {
-      const io = req.app.get('io');
-      io.to(`user:${other._id}`).emit('chat-created', serialized);
-    }
-
     res.status(created ? 201 : 200).json(serialized);
   } catch (err) {
     console.error('[chat] private chat failed:', err.message);
@@ -100,8 +101,13 @@ async function createGroupChat(req, res) {
       admin: req.session.userId,
     });
     chat = await chat.populate(CHAT_POPULATE);
-    const serialized = serializeChat(chat.toObject(), req.session.userId);
 
+    // Groups notify everyone immediately (unlike private chats — see
+    // createPrivateChat above) — this is unaffected by that change since
+    // serializeChat's name for a group is just chat.name, not
+    // perspective-dependent, so the same serialized object is correct
+    // for every recipient.
+    const serialized = serializeChat(chat.toObject(), req.session.userId);
     const io = req.app.get('io');
     memberIds.forEach((id) => io.to(`user:${id}`).emit('chat-created', serialized));
 
@@ -114,7 +120,10 @@ async function createGroupChat(req, res) {
 
 // Cursor-paginated history, newest page first, returned in chronological
 // order. For Cloud Chats this is plain text; for Secret Chats it's
-// ciphertext — see models/Message.js.
+// ciphertext — see models/Message.js. Deliberately not gated by
+// visibleToMe() — that's a "should this show in my list" rule, not an
+// access-control one; being a real participant (checked below) is what
+// actually authorizes reading a chat's messages.
 async function getMessages(req, res) {
   const { chatId } = req.params;
   const { before, limit = 30 } = req.query;
