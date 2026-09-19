@@ -29,6 +29,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [Project structure](#project-structure)
 - [Cloud Chats vs. Secret Chats](#cloud-chats-vs-secret-chats)
 - [How the client/server separation works](#how-the-clientserver-separation-works)
+- [How Cloud Chat encryption-at-rest works](#how-cloud-chat-encryption-at-rest-works)
 - [How Secret Chat encryption works](#how-secret-chat-encryption-works)
 - [Security model](#security-model)
 - [How the real-time architecture works](#how-the-real-time-architecture-works)
@@ -66,7 +67,9 @@ npm install
 
 # 3. Configure environment
 cp .env.example .env
-# then edit .env: set MONGODB_URI and a random SESSION_SECRET
+# then edit .env: set MONGODB_URI, a random SESSION_SECRET, and
+# CLOUD_ENCRYPTION_KEY (a 64-char hex string — .env.example shows how to
+# generate one). The server won't start without a valid encryption key.
 
 # 4. Run it
 npm run dev      # with nodemon, auto-restarts on changes
@@ -89,6 +92,7 @@ server/
   middleware/             Session-based auth guard, Multer upload config
   sockets/index.js        All Socket.IO logic — branches on chat.isSecret
   utils/serialize.js      Shapes Mongoose docs into client-friendly JSON
+  utils/fieldCrypto.js    Cloud Chat encryption-at-rest (AES-256-GCM, server-held key)
   uploads/                Attachment files (plain for Cloud, ciphertext for Secret)
 
 client/
@@ -111,7 +115,7 @@ Every 1:1 chat is one or the other; groups are always Cloud Chats (see [Security
 
 | | Cloud Chat (default) | Secret Chat (opt-in) |
 |---|---|---|
-| Where messages live | MongoDB, in the clear (like any normal chat app) | MongoDB, as ciphertext the server can't read |
+| Where messages live | MongoDB, encrypted at rest with a server-held key (the app can still read/process them — see [Security model](#security-model)) | MongoDB, as ciphertext the server has no key for at all |
 | Available on a new device? | Yes — log in, it's there | No — tied to the device(s) it's been used on |
 | Setup required | None | None to *use* — a key is generated automatically the first time you open one |
 | Groups? | Yes | No (1:1 only — see below) |
@@ -127,6 +131,18 @@ By default, `server/app.js` also serves `client/` as static files, so `npm run d
 
 - `client/src/config.js` exports `API_BASE_URL` / `SOCKET_URL`. Point these at a different host and the client works talking to a server running anywhere else.
 - The server has CORS enabled (`server/app.js`) and reflects the request's origin with `credentials: true` by default, so a client served from a different port or domain during development just works. Set `ALLOWED_ORIGIN` in `.env` to lock this down before deploying.
+
+## How Cloud Chat encryption-at-rest works
+
+Cloud Chats aren't end-to-end encrypted — the server genuinely needs to read them to do its job (search, moderation, cross-device sync without any client-side key). But "the server can read it" doesn't have to mean "anyone who steals a copy of the database can read it too."
+
+`server/utils/fieldCrypto.js` encrypts message text and attachment filenames with AES-256-GCM before they're written to MongoDB, and decrypts them again — once, in `utils/serialize.js` — on the way back out to the API. The key (`CLOUD_ENCRYPTION_KEY`) lives only in the server's environment, never in the database itself. That split is the whole point: a database dump, a stolen backup, or leaked DB credentials are a *different* failure than a leaked environment variable, so getting one doesn't automatically hand over the other.
+
+What this protects against: someone getting a copy of your MongoDB data (a backup, a dump, an unsecured database exposed to the internet) without also getting your server's environment.
+
+What it doesn't protect against: a compromised, running server process — which has the key loaded in memory to do its job — or anyone with direct access to that environment. That's an inherent limit of any system where the server needs to process the content, not a bug specific to this implementation; it's the same trade-off full-disk encryption or a cloud provider's KMS makes. If a conversation needs to be unreadable even to a fully compromised server, that's what Secret Chats are for.
+
+One practical consequence worth knowing: losing `CLOUD_ENCRYPTION_KEY`, or changing it, makes existing Cloud Chat messages permanently unreadable (there's graceful handling so the app doesn't crash — it shows `[This message could not be decrypted]` instead — but the data is genuinely gone). Back this key up somewhere durable once there's real data behind it.
 
 ## How Secret Chat encryption works
 
@@ -146,7 +162,7 @@ All of this is built on the browser's native `crypto.subtle` — no third-party 
 
 | Cloud Chats | Secret Chats |
 |---|---|
-| Stored and readable server-side, like Slack, Discord, or Telegram's own default chats. This is expected, not a bug — it's what makes "log in anywhere, see everything" possible with zero key management. | Server and database only ever hold ciphertext. A full database compromise or legal request for stored data does not expose Secret Chat contents. |
+| **Encrypted at rest** with a server-held key (`CLOUD_ENCRYPTION_KEY`, see `server/utils/fieldCrypto.js`) — the server still processes them normally (that's what makes "log in anywhere, see everything" possible with zero client-side key management), but a raw database dump, stolen backup, or leaked DB credentials yield ciphertext, *provided the encryption key wasn't also exposed* — it deliberately lives only in the environment, never in the database. This does not protect against a fully compromised, running server process, which has the key loaded to do its job — same trade-off as disk encryption or any server-side KMS. | Server and database only ever hold ciphertext, and the server never has the key *at all*, not even in memory. A full database compromise or legal request for stored data does not expose Secret Chat contents, full stop — there's no key on the server side to also compromise. |
 
 For Secret Chats specifically, being upfront about what the encryption does and doesn't protect against matters more than the phrase "end-to-end encrypted" on its own:
 

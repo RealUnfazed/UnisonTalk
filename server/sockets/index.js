@@ -2,6 +2,7 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const { serializeMessage } = require('../utils/serialize');
+const { encryptField } = require('../utils/fieldCrypto');
 
 // Tracks how many open sockets/tabs each user currently has, so we only
 // flip someone to "offline" once their very last connection drops.
@@ -62,11 +63,13 @@ async function handleConnection(io, socket) {
     if (chatId) socket.to(chatId).emit('stop-typing', { chatId, userId });
   });
 
-  // For a Cloud Chat, `content` is plain text the server actually stores
-  // and can read (like any normal chat app). For a Secret Chat,
-  // `ciphertext`/`iv` (and the attachment's `metaCiphertext`) arrive
-  // already encrypted from the browser and are stored exactly as
-  // received — this handler never sees the real text for those.
+  // For a Cloud Chat, `content` is plain text as far as the app logic is
+  // concerned — but it's encrypted at rest before it touches MongoDB (see
+  // utils/fieldCrypto.js), transparently to everyone but this function and
+  // serializeMessage, which decrypts it again on the way out. For a Secret
+  // Chat, `ciphertext`/`iv` (and the attachment's `metaCiphertext`) arrive
+  // already encrypted from the browser and are stored exactly as received
+  // — this handler never has the key for those at all.
   socket.on('send-message', async ({ chatId, content, ciphertext, iv, attachment } = {}, ack) => {
     try {
       const chat = await Chat.findOne({ _id: chatId, participants: userId });
@@ -77,15 +80,33 @@ async function handleConnection(io, socket) {
       if (!chatId || !hasPayload) {
         return ack?.({ error: 'Message needs text or an attachment' });
       }
+      if (!chat.isSecret && trimmedContent.length > 4000) {
+        return ack?.({ error: 'Message is too long (4000 characters max)' });
+      }
 
-      let message = await Message.create({
+      const messageData = {
         chat: chatId,
         sender: userId,
-        content: !chat.isSecret && trimmedContent ? trimmedContent : undefined,
         ciphertext: chat.isSecret && ciphertext ? ciphertext : undefined,
         iv: chat.isSecret && ciphertext ? iv : undefined,
-        attachment: attachment || undefined,
-      });
+      };
+
+      if (!chat.isSecret && trimmedContent) {
+        const encryptedContent = encryptField(trimmedContent);
+        messageData.content = encryptedContent.ciphertext;
+        messageData.contentIv = encryptedContent.iv;
+      }
+
+      if (attachment) {
+        if (!chat.isSecret && attachment.filename) {
+          const encryptedName = encryptField(attachment.filename);
+          messageData.attachment = { ...attachment, filename: encryptedName.ciphertext, filenameIv: encryptedName.iv };
+        } else {
+          messageData.attachment = attachment;
+        }
+      }
+
+      let message = await Message.create(messageData);
       message = await message.populate('sender', 'username');
 
       // Bumps `updatedAt` via timestamps, which is what chat list sorting relies on.
