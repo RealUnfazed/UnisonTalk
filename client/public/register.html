@@ -99,8 +99,22 @@
           Create account
         </button>
       </form>
+
+      <div id="sso-section" class="hidden">
+        <div class="relative my-5">
+          <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-black/10"></div></div>
+          <div class="relative flex justify-center"><span class="bg-white px-2 text-xs text-slate">or</span></div>
+        </div>
+        <a
+          href="/api/auth/sso/phasetime"
+          class="w-full flex items-center justify-center gap-2 border border-black/10 rounded-lg py-2.5 text-sm font-medium text-ink hover:bg-mist transition-colors"
+        >
+          <i class="fa-solid fa-shield-halved text-signal-dark"></i> Continue with Phasetime
+        </a>
+      </div>
+
       <p class="text-xs text-slate mt-4">
-        <i class="fa-solid fa-shield-halved mr-1"></i>
+        <i class="fa-solid fa-lock mr-1"></i>
         Your chats sync automatically once you're logged in. Want a conversation nobody else can read — not even us? Start a Secret Chat any time from the chat list.
       </p>
     </div>

@@ -82,6 +82,7 @@ If you're looking for a place to start, these are areas the project could use he
 - An automated test suite (currently none exists) — the crypto module (`client/src/crypto/`) especially would benefit from unit tests that verify encrypt→decrypt round-trips
 - Accessibility passes on the chat UI (keyboard navigation, screen reader labels)
 - Rate limiting on login/register/message-sending
+- Additional SSO providers beyond Phasetime (`server/controllers/ssoController.js` is a fairly self-contained reference for what a provider integration needs — config, authorize redirect, callback, account create-or-link)
 
 Check the [issues page](https://github.com/RealUnfazed/unisontalk/issues) for anything labeled `good first issue` or `help wanted`.
 

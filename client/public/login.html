@@ -82,6 +82,19 @@
           Log in
         </button>
       </form>
+
+      <div id="sso-section" class="hidden">
+        <div class="relative my-5">
+          <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-black/10"></div></div>
+          <div class="relative flex justify-center"><span class="bg-white px-2 text-xs text-slate">or</span></div>
+        </div>
+        <a
+          href="/api/auth/sso/phasetime"
+          class="w-full flex items-center justify-center gap-2 border border-black/10 rounded-lg py-2.5 text-sm font-medium text-ink hover:bg-mist transition-colors"
+        >
+          <i class="fa-solid fa-shield-halved text-signal-dark"></i> Continue with Phasetime
+        </a>
+      </div>
     </div>
 
     <p class="text-center text-sm text-slate mt-6">

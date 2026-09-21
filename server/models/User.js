@@ -19,9 +19,24 @@ const userSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+    // Not `required` at the schema level, because a Phasetime SSO signup
+    // never sets one at all — see controllers/ssoController.js. Local
+    // registration (controllers/authController.js) enforces its own
+    // "password is required" check before ever calling User.create().
     password: {
       type: String,
-      required: true,
+      default: null,
+    },
+    // Set once a person signs in with (or links) Phasetime SSO —
+    // see controllers/ssoController.js and README.md's "Phasetime SSO"
+    // section. `sparse: true` lets any number of accounts have this
+    // unset (null) without violating the uniqueness constraint; only
+    // actual Phasetime IDs need to be unique.
+    phasetimeId: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true,
     },
     isOnline: {
       type: Boolean,
@@ -47,7 +62,7 @@ const userSchema = new mongoose.Schema(
 
 // Hash the password whenever it is created or changed, never store it in plain text.
 userSchema.pre('save', async function hashPassword(next) {
-  if (!this.isModified('password')) return next();
+  if (!this.isModified('password') || !this.password) return next();
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -57,7 +72,11 @@ userSchema.pre('save', async function hashPassword(next) {
   }
 });
 
+// A Phasetime-only account (no local password ever set) should just
+// never match a password login attempt, not throw when bcrypt is handed
+// a null hash.
 userSchema.methods.comparePassword = function comparePassword(candidate) {
+  if (!this.password) return Promise.resolve(false);
   return bcrypt.compare(candidate, this.password);
 };
 
