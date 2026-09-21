@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { $ } from '../utils/dom.js';
+import { revealSsoButtonIfEnabled, showSsoErrorIfAny } from './ssoStatus.js';
 
 const form = $('#login-form');
 const errorEl = $('#form-error');
@@ -8,6 +9,9 @@ function showError(message) {
   errorEl.textContent = message;
   errorEl.classList.remove('hidden');
 }
+
+revealSsoButtonIfEnabled();
+showSsoErrorIfAny();
 
 // Deliberately simple: no key handling of any kind here. Cloud Chats need
 // none, and a Secret Chat identity is generated lazily the first time this

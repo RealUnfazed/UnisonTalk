@@ -12,6 +12,13 @@ function serializeUser(user) {
     // Only meaningful for Secret Chats — null for anyone who's never
     // started one. Safe to expose: it's the public half of a key pair.
     publicKey: user.publicKey || null,
+    // Whether this account is linked to a Phasetime SSO identity — just
+    // a boolean, never the actual phasetimeId. Only really meaningful for
+    // "my own" account data (queries that select a restricted field set,
+    // like chat participants, won't have `phasetimeId` loaded at all, so
+    // this will read as false for other users regardless of reality —
+    // that's fine, nothing currently displays this for anyone but "me").
+    hasPhasetimeLink: !!user.phasetimeId,
   };
 }
 

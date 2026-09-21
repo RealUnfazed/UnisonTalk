@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { $ } from '../utils/dom.js';
+import { revealSsoButtonIfEnabled } from './ssoStatus.js';
 
 const form = $('#register-form');
 const errorEl = $('#form-error');
@@ -8,6 +9,8 @@ function showError(message) {
   errorEl.textContent = message;
   errorEl.classList.remove('hidden');
 }
+
+revealSsoButtonIfEnabled();
 
 // No key generation here — accounts start with Cloud Chats only, which
 // need no keys at all. A Secret Chat identity is created lazily the first

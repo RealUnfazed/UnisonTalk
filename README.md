@@ -33,6 +33,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [How Secret Chat encryption works](#how-secret-chat-encryption-works)
 - [Security model](#security-model)
 - [How the real-time architecture works](#how-the-real-time-architecture-works)
+- [Phasetime SSO (optional)](#phasetime-sso-optional)
 - [Notes & possible extensions](#notes--possible-extensions)
 - [Contributing](#contributing)
 - [License](#license)
@@ -40,7 +41,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 
 ## Features
 
-- **Accounts** — register/login with hashed passwords (bcrypt), sessions stored in MongoDB
+- **Accounts** — register/login with hashed passwords (bcrypt), sessions stored in MongoDB, or sign in with [Phasetime SSO](#phasetime-sso-optional) if configured
 - **Cloud Chats** — private chats and groups that just work: log in anywhere, your conversations and files are already there
 - **Secret Chats** — opt-in, genuinely end-to-end encrypted 1:1 chats; the server never sees plaintext
 - **Online status** — presence dots update live as people connect/disconnect, even across multiple tabs
@@ -86,13 +87,16 @@ server/
   server.js              Entry point: connects MongoDB, starts HTTP + Socket.IO
   app.js                 Express app config — CORS, sessions, routes, static serving
   config/db.js           MongoDB connection
+  config/phasetime.js    Phasetime SSO config (returns null if unconfigured — feature is optional)
   models/                Mongoose schemas: User, Chat (isGroup/isSecret), Message
-  controllers/           Request handlers — auth, chats/messages, uploads
+  controllers/           Request handlers — auth, chats/messages, uploads, Phasetime SSO
   routes/                Route definitions, wired to controllers
   middleware/             Session-based auth guard, Multer upload config
   sockets/index.js        All Socket.IO logic — branches on chat.isSecret
   utils/serialize.js      Shapes Mongoose docs into client-friendly JSON
   utils/fieldCrypto.js    Cloud Chat encryption-at-rest (AES-256-GCM, server-held key)
+  utils/chatPopulate.js   Shared Chat query population spec
+  utils/chatVisibility.js Shared "should this chat show in my list yet" rule
   uploads/                Attachment files (plain for Cloud, ciphertext for Secret)
 
 client/
@@ -105,7 +109,8 @@ client/
     views/                Pure rendering: SidebarView, ChatView, ModalView
     controllers/           ChatController — wires sockets, the API, crypto (when
                            needed), and views together; the isSecret branch point
-    pages/                Per-page bootstrap scripts (chatPage, loginPage, registerPage)
+    pages/                Per-page bootstrap scripts (chatPage, loginPage, registerPage,
+                           ssoStatus.js shared by the auth pages)
     api.js, socket.js, config.js   Thin wrappers around fetch / Socket.IO / base URLs
 ```
 
@@ -191,6 +196,28 @@ This lets a socket connection read `socket.request.session.userId` — the same 
 **Presence uses reference counting, not just connect/disconnect.** A user can have the app open in multiple tabs. `server/sockets/index.js` keeps an in-memory `Map` of `userId -> Set of socket ids` so a user is only marked offline once their *last* tab disconnects — and it does this from the `disconnecting` event (not `disconnect`), because that's the last moment a socket still knows which rooms it belonged to.
 
 **Typing indicators are deliberately not persisted.** They're pure ephemeral events (`socket.to(chatId).emit('typing', ...)`) with a client-side timeout as a safety net in case a "stop typing" event is ever lost — nothing touches the database for this.
+
+## Phasetime SSO (optional)
+
+UnisonTalk can optionally support signing in via [Phasetime SSO](https://github.com/RealUnfazed/Phasetime-SSO), an open-source, self-hostable single sign-on server — either the public instance at `account.unfazed.ir` or your own deployment of the same software. It's a standard OAuth2 Authorization Code flow, so this is a normal OAuth client integration, not anything Phasetime-specific under the hood.
+
+**It's entirely optional.** Leave `PHASETIME_SSO_BASE_URL`, `PHASETIME_CLIENT_ID`, `PHASETIME_CLIENT_SECRET`, and `PHASETIME_REDIRECT_URI` unset in `.env` and the feature simply doesn't appear — no "Continue with Phasetime" button, no forced setup, nothing else in the app depends on it. `server/config/phasetime.js` returning `null` when any of those four are missing is what every SSO route checks before doing anything.
+
+### Setup
+
+1. Register this app as a client in your Phasetime instance's admin panel to get a client ID and secret.
+2. Set the four `PHASETIME_*` variables in `.env` — see `.env.example` for the exact names and a walkthrough.
+3. **`PHASETIME_REDIRECT_URI` must match what's registered in Phasetime's admin panel exactly, byte for byte** — this is a security requirement of the SSO server itself (prevents a stolen authorization code from being redeemed against a different URL), not a UnisonTalk quirk.
+
+### How it works
+
+- `GET /api/auth/sso/phasetime` — starts a login/signup attempt: generates a random `state` value (stored in the session, for CSRF protection), then redirects the browser to Phasetime's `/authorize.php`.
+- `GET /api/auth/sso/phasetime/callback` — Phasetime redirects back here with a one-time `code`. The server exchanges it for an access token via a server-to-server `POST /token.php` call (the only place `PHASETIME_CLIENT_SECRET` is ever used — it never reaches the browser), then fetches `{ id, name, email }` from `/userinfo.php`.
+- If a local account is already linked to that Phasetime `id`, that account gets signed in. Otherwise, a new account is created automatically, with a username derived from the Phasetime profile's display name (sanitized to fit UnisonTalk's username rules, with a numeric suffix appended if there's a collision) and no local password at all — signing in with a plain username/password is simply never possible for an account that was never given one, without needing a special "SSO-only" flag anywhere.
+- **Existing accounts can link a Phasetime identity** instead of creating a duplicate: `GET /api/auth/sso/phasetime/link` (only reachable while already logged in) runs the same OAuth round trip, but attaches the resulting Phasetime ID to the *current* account instead of creating or looking up a new one. There's a "Link Phasetime account" button for this in the sidebar (next to logout) whenever SSO is configured; it switches to "Unlink" once linked.
+- If a fresh sign-in's Phasetime email matches an *existing, unlinked* local account, UnisonTalk deliberately does **not** auto-merge them — that's exactly the kind of assumption that fails quietly and unpredictably (email verification guarantees vary, and typo-squatted or previously-abandoned addresses exist). It shows a clear message instead, telling the person to log in normally and link explicitly.
+
+None of this touches Cloud vs. Secret Chats — a Phasetime-authenticated account works exactly like a normal one everywhere else in the app once signed in.
 
 ## Notes & possible extensions
 
