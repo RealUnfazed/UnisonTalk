@@ -98,6 +98,9 @@
             <span class="w-1.5 h-1.5 rounded-full bg-harmony inline-block"></span> Online
           </p>
         </div>
+        <button id="settings-btn" type="button" class="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/70" title="Settings">
+          <i class="fa-solid fa-gear text-sm"></i>
+        </button>
         <button id="phasetime-btn" type="button" class="hidden w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-white/70" title="Link Phasetime account">
           <i class="fa-solid fa-shield-halved text-sm"></i>
         </button>
@@ -119,7 +122,7 @@
 
       <!-- Active chat -->
       <div id="active-chat" class="hidden flex-1 flex flex-col min-h-0">
-        <header class="px-6 py-4 border-b border-black/5 bg-white flex items-center gap-3">
+        <header id="chat-header-info" class="px-6 py-4 border-b border-black/5 bg-white flex items-center gap-3 cursor-pointer" title="Chat info">
           <img id="chat-header-avatar" src="" alt="" class="w-10 h-10 rounded-full object-cover" />
           <div class="min-w-0">
             <p id="chat-header-name" class="font-display font-semibold text-ink truncate"></p>
@@ -202,6 +205,77 @@
       <button id="create-group-btn" class="w-full bg-ink text-white text-sm font-medium rounded-lg py-2.5 hover:bg-ink-light transition-colors">
         Create group
       </button>
+    </div>
+  </div>
+
+  <!-- ============ Settings modal ============ -->
+  <div id="settings-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display font-semibold text-lg">Settings</h2>
+        <button data-close-modal class="text-slate hover:text-ink"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p id="settings-error" class="hidden mb-3 text-sm text-ember bg-ember/10 border border-ember/20 rounded-lg px-3 py-2"></p>
+
+      <p class="text-xs font-semibold text-slate mb-2">Profile</p>
+      <div class="flex items-center gap-4 mb-3">
+        <img id="settings-avatar" src="" alt="" class="w-16 h-16 rounded-full object-cover" />
+        <div class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium text-ink cursor-pointer hover:text-signal-dark">
+            <i class="fa-solid fa-camera mr-1"></i> Change photo
+            <input id="settings-avatar-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" />
+          </label>
+          <button id="settings-avatar-remove" type="button" class="text-left text-xs text-slate hover:text-ember">Remove photo</button>
+        </div>
+      </div>
+      <label class="block text-sm font-medium text-ink mb-1" for="settings-display-name">Display name</label>
+      <input id="settings-display-name" type="text" maxlength="40" placeholder="How your name appears to others"
+        class="w-full border border-black/10 rounded-lg px-3.5 py-2.5 text-sm mb-1 focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal" />
+      <p id="settings-username" class="text-xs text-slate mb-5"></p>
+
+      <p class="text-xs font-semibold text-slate mb-2">Privacy</p>
+      <label class="flex items-start gap-3 mb-3 cursor-pointer">
+        <input id="settings-show-last-seen" type="checkbox" class="mt-1 accent-[#D9A62E]" />
+        <span class="text-sm text-ink">Show my last seen &amp; online status<br><span class="text-xs text-slate">When off, others see "last seen recently" and no online dot.</span></span>
+      </label>
+      <label class="flex items-start gap-3 mb-5 cursor-pointer">
+        <input id="settings-discoverable" type="checkbox" class="mt-1 accent-[#D9A62E]" />
+        <span class="text-sm text-ink">Let people find me by username<br><span class="text-xs text-slate">When off, you won't appear in search. Existing chats are unaffected.</span></span>
+      </label>
+
+      <p class="text-xs font-semibold text-slate mb-2">Media</p>
+      <label class="block text-sm text-ink mb-1">Auto-preview images up to: <span id="settings-autodownload-label" class="font-medium"></span></label>
+      <input id="settings-autodownload" type="range" min="0" max="50" step="1" class="w-full mb-6 accent-[#D9A62E]" />
+
+      <button id="settings-save" type="button" class="w-full bg-ink text-white text-sm font-medium rounded-lg py-2.5 hover:bg-ink-light transition-colors">Save changes</button>
+    </div>
+  </div>
+
+  <!-- ============ Group info modal ============ -->
+  <div id="group-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display font-semibold text-lg">Group info</h2>
+        <button data-close-modal class="text-slate hover:text-ink"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p id="group-error" class="hidden mb-3 text-sm text-ember bg-ember/10 border border-ember/20 rounded-lg px-3 py-2"></p>
+      <div class="flex items-center gap-4 mb-4">
+        <img id="group-avatar" src="" alt="" class="w-16 h-16 rounded-full object-cover" />
+        <label id="group-avatar-label" class="text-sm font-medium text-ink cursor-pointer hover:text-signal-dark">
+          <i class="fa-solid fa-camera mr-1"></i> Change group photo
+          <input id="group-avatar-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" />
+        </label>
+      </div>
+      <label class="block text-sm font-medium text-ink mb-1" for="group-name-edit">Group name</label>
+      <input id="group-name-edit" type="text" maxlength="40"
+        class="w-full border border-black/10 rounded-lg px-3.5 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal disabled:bg-mist" />
+      <label class="block text-sm font-medium text-ink mb-1" for="group-desc-edit">Description</label>
+      <textarea id="group-desc-edit" rows="3" maxlength="200" placeholder="What's this group about?"
+        class="w-full border border-black/10 rounded-lg px-3.5 py-2.5 text-sm mb-3 resize-none focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal disabled:bg-mist"></textarea>
+      <p id="group-readonly-note" class="hidden text-xs text-slate mb-3">Only the group's creator can edit this.</p>
+      <p class="text-xs font-semibold text-slate mb-2">Members</p>
+      <div id="group-members" class="space-y-1 mb-4 max-h-48 overflow-y-auto"></div>
+      <button id="group-save" type="button" class="w-full bg-ink text-white text-sm font-medium rounded-lg py-2.5 hover:bg-ink-light transition-colors">Save group</button>
     </div>
   </div>
 

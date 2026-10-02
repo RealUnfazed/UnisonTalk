@@ -21,7 +21,7 @@ async function register(req, res) {
 
     const user = await User.create({ username: username.trim(), email: email.trim(), password });
     req.session.userId = user._id.toString();
-    res.status(201).json({ user: serializeUser(user) });
+    res.status(201).json({ user: serializeUser(user, user._id.toString()) });
   } catch (err) {
     console.error('[auth] register failed:', err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -39,7 +39,7 @@ async function login(req, res) {
     }
 
     req.session.userId = user._id.toString();
-    res.json({ user: serializeUser(user) });
+    res.json({ user: serializeUser(user, user._id.toString()) });
   } catch (err) {
     console.error('[auth] login failed:', err.message);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -59,7 +59,7 @@ async function me(req, res) {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
   const user = await User.findById(req.session.userId).select('-password').lean();
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
-  res.json({ user: serializeUser(user) });
+  res.json({ user: serializeUser(user, req.session.userId) });
 }
 
 // Called lazily, the first time this browser needs a Secret Chat identity
@@ -72,7 +72,7 @@ async function updatePublicKey(req, res) {
   const user = await User.findByIdAndUpdate(req.session.userId, { publicKey }, { new: true }).select(
     '-password'
   );
-  res.json({ user: serializeUser(user) });
+  res.json({ user: serializeUser(user, req.session.userId) });
 }
 
 module.exports = { register, login, logout, me, updatePublicKey };

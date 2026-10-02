@@ -61,6 +61,24 @@ export class AppState extends EventTarget {
     this.emit('presence:changed', { userId, isOnline, lastSeen });
   }
 
+  updateChat(chat) {
+    this.chats.set(chat.id, chat);
+    this.emit('chats:changed');
+  }
+
+  // Someone we share a chat with changed their profile (name/avatar/
+  // presence) — patch them into every chat they're in, and refresh the
+  // computed name of any private chat where they're "the other person".
+  applyUserUpdate(user) {
+    this.chats.forEach((chat) => {
+      const i = chat.participants.findIndex((p) => p.id === user.id);
+      if (i < 0) return;
+      chat.participants[i] = { ...chat.participants[i], ...user };
+      if (!chat.isGroup) chat.name = user.displayName || user.username;
+    });
+    this.emit('chats:changed');
+  }
+
   emit(name, detail) {
     this.dispatchEvent(new CustomEvent(name, { detail }));
   }

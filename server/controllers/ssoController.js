@@ -151,7 +151,7 @@ async function unlink(req, res) {
   const user = await User.findByIdAndUpdate(req.session.userId, { phasetimeId: null }, { new: true }).select(
     '-password'
   );
-  res.json({ user: serializeUser(user) });
+  res.json({ user: serializeUser(user, req.session.userId) });
 }
 
 // Derives a schema-valid, unique username from whatever display name

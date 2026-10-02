@@ -43,8 +43,12 @@ async function handleConnection(io, socket) {
   onlineSocketsByUser.set(userId, sockets);
 
   if (wasOffline) {
-    await User.findByIdAndUpdate(userId, { isOnline: true });
-    broadcastPresence(io, socket, 'user-online', { userId });
+    const updatedUser = await User.findByIdAndUpdate(userId, { isOnline: true }, { new: true }).select(
+      'privacy.showLastSeen'
+    );
+    if (updatedUser?.privacy?.showLastSeen !== false) {
+      broadcastPresence(io, presenceRooms(socket), 'user-online', { userId });
+    }
   }
 
   // Called when the client opens a chat that was created after this socket
@@ -115,7 +119,7 @@ async function handleConnection(io, socket) {
       }
 
       let message = await Message.create(messageData);
-      message = await message.populate('sender', 'username');
+      message = await message.populate('sender', 'username displayName avatar');
 
       // Bumps `updatedAt` via timestamps, which is what chat list sorting relies on.
       chat.lastMessage = message._id;
@@ -165,20 +169,30 @@ async function handleConnection(io, socket) {
     if (sockets.size === 0) {
       onlineSocketsByUser.delete(userId);
       const lastSeen = new Date();
-      User.findByIdAndUpdate(userId, { isOnline: false, lastSeen }).catch((err) =>
-        console.error('[socket] failed to mark offline:', err.message)
-      );
-      broadcastPresence(io, socket, 'user-offline', { userId, lastSeen });
+      // Captured now, synchronously — socket.rooms is only guaranteed
+      // populated up to this point, and the privacy check below is async.
+      const rooms = presenceRooms(socket);
+
+      User.findByIdAndUpdate(userId, { isOnline: false, lastSeen }, { new: true })
+        .select('privacy.showLastSeen')
+        .then((updatedUser) => {
+          if (updatedUser?.privacy?.showLastSeen !== false) {
+            broadcastPresence(io, rooms, 'user-offline', { userId, lastSeen });
+          }
+        })
+        .catch((err) => console.error('[socket] failed to mark offline:', err.message));
     }
   });
 }
 
-// Emits a presence event to every chat room this socket belongs to
-// (skipping its own per-user notification room).
-function broadcastPresence(io, socket, event, payload) {
-  const rooms = Array.from(socket.rooms).filter(
-    (room) => room !== socket.id && !room.startsWith('user:')
-  );
+// The chat rooms (not the socket's own id room or its personal
+// user:<id> notification room) this socket currently belongs to — used
+// to decide who to notify about a presence change.
+function presenceRooms(socket) {
+  return Array.from(socket.rooms).filter((room) => room !== socket.id && !room.startsWith('user:'));
+}
+
+function broadcastPresence(io, rooms, event, payload) {
   rooms.forEach((room) => io.to(room).emit(event, payload));
 }
 

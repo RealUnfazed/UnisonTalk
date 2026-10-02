@@ -1,5 +1,5 @@
 import { $, el } from '../utils/dom.js';
-import { avatarFor, formatClock, formatRelative, formatFileSize } from '../utils/format.js';
+import { avatarFor, nameFor, chatAvatarUrl, formatClock, formatRelative, formatFileSize } from '../utils/format.js';
 
 export class ChatView {
   constructor() {
@@ -21,7 +21,7 @@ export class ChatView {
 
   renderHeader(chat, myUserId) {
     const other = !chat.isGroup ? chat.participants.find((p) => p.id !== myUserId) : null;
-    $('#chat-header-avatar').src = chat.isGroup ? avatarFor(chat.name || 'Group') : other?.avatarUrl || avatarFor(chat.name);
+    $('#chat-header-avatar').src = chatAvatarUrl(chat, myUserId);
 
     const nameEl = $('#chat-header-name');
     nameEl.innerHTML = '';
@@ -55,7 +55,7 @@ export class ChatView {
   }
 
   lastSeenLabel(lastSeen) {
-    if (!lastSeen) return 'Offline';
+    if (!lastSeen) return 'Last seen recently';
     return `Last seen ${formatRelative(lastSeen)} ago`;
   }
 
@@ -99,7 +99,7 @@ export class ChatView {
 
     if (!isMe) {
       const img = el('img', 'w-7 h-7 rounded-full object-cover shrink-0');
-      img.src = msg.sender.avatarUrl || avatarFor(msg.sender.username || '?');
+      img.src = msg.sender.avatarUrl || avatarFor(nameFor(msg.sender) || '?');
       row.appendChild(img);
     }
 
@@ -109,7 +109,7 @@ export class ChatView {
     );
 
     if (!isMe && isGroup) {
-      bubble.appendChild(el('p', 'text-[11px] font-semibold text-harmony mb-0.5', msg.sender.username || ''));
+      bubble.appendChild(el('p', 'text-[11px] font-semibold text-harmony mb-0.5', nameFor(msg.sender)));
     }
 
     if (decrypted.text) {
@@ -146,7 +146,7 @@ export class ChatView {
     // click needed just to see it. Cloud Chats can use the file's real
     // URL directly (nothing to decrypt); Secret Chats use the
     // already-decrypted blob URL prepared in prepareSecretAttachmentInfo.
-    const imageSrc = info.isSecret ? info.previewUrl : info.url;
+    const imageSrc = info.isSecret ? info.previewUrl : info.autoPreview === false ? null : info.url;
     if (info.isImage && imageSrc) {
       const img = el('img', 'rounded-lg max-w-full max-h-64 cursor-pointer block');
       img.src = imageSrc;

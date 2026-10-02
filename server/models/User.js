@@ -12,6 +12,16 @@ const userSchema = new mongoose.Schema(
       maxlength: 24,
       match: /^[a-zA-Z0-9_]+$/,
     },
+    // A separate, freely-changeable identity shown throughout the UI.
+    // `username` stays fixed (it's what search/mentions key off of);
+    // this is purely cosmetic and defaults to null, meaning "just show
+    // the username" — see avatarUrl() below and utils/serialize.js.
+    displayName: {
+      type: String,
+      trim: true,
+      maxlength: 40,
+      default: null,
+    },
     email: {
       type: String,
       required: true,
@@ -46,6 +56,13 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    // Server-relative path to an uploaded profile picture (see
+    // controllers/userController.js), or null to fall back to the
+    // generated ui-avatars.com avatar — see avatarUrl() below.
+    avatar: {
+      type: String,
+      default: null,
+    },
     // Base64-encoded SPKI export of the user's ECDH (P-256) public key.
     // Only ever needed for Secret Chats (see models/Chat.js) — Cloud
     // Chats don't use client-side encryption at all, so most accounts
@@ -55,6 +72,30 @@ const userSchema = new mongoose.Schema(
     publicKey: {
       type: String,
       default: null,
+    },
+    // Deliberately simple, flattened privacy controls — not Telegram's
+    // full "Everyone / My Contacts / Nobody" model, since this app has no
+    // contacts list to key a middle tier off of, and not reciprocal
+    // (hiding your own last seen doesn't also hide others' from you,
+    // the way Telegram's does) — see README's "Profile & group
+    // customization" section for the reasoning and what's deferred.
+    privacy: {
+      // Controls BOTH online status and the last-seen timestamp — showing
+      // one without the other is a strange half-measure. Always visible
+      // to the account's own owner regardless of this setting.
+      showLastSeen: { type: Boolean, default: true },
+      // Whether this account can be found via username search to start
+      // a new chat. Doesn't affect chats the person is already in.
+      discoverable: { type: Boolean, default: true },
+    },
+    // Images/files above this size won't auto-preview inline — see
+    // client/src/controllers/ChatController.js's use of this alongside
+    // attachment.size. Applies to both Cloud and Secret Chat attachments.
+    autoDownloadLimitMb: {
+      type: Number,
+      default: 5,
+      min: 0,
+      max: 100,
     },
   },
   { timestamps: true }
@@ -80,9 +121,13 @@ userSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password);
 };
 
-// A deterministic avatar so every user has a face without needing uploads.
+// Real uploaded picture if there is one; otherwise a deterministic
+// generated avatar so every account still has a face. Keyed off
+// displayName when set, so someone who's set a display name gets an
+// avatar with the initials/color that actually matches what's shown.
 userSchema.methods.avatarUrl = function avatarUrl() {
-  const encoded = encodeURIComponent(this.username);
+  if (this.avatar) return this.avatar;
+  const encoded = encodeURIComponent(this.displayName || this.username);
   return `https://ui-avatars.com/api/?name=${encoded}&background=random&bold=true`;
 };
 

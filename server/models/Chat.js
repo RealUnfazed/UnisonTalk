@@ -26,6 +26,19 @@ const chatSchema = new mongoose.Schema(
       trim: true,
       maxlength: 40,
     },
+    // Group-only, like `name` — see controllers/chatController.updateGroup.
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: '',
+    },
+    // Server-relative path to an uploaded group picture, or null for the
+    // client's generated fallback (same pattern as User.avatar).
+    avatar: {
+      type: String,
+      default: null,
+    },
     participants: [
       {
         type: mongoose.Schema.Types.ObjectId,

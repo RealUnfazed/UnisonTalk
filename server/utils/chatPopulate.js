@@ -6,6 +6,9 @@
 // view when a chat becomes visible on someone's first message — see the
 // comment above the "first message" handling in sockets/index.js).
 module.exports = [
-  { path: 'participants', select: 'username isOnline lastSeen publicKey' },
-  { path: 'lastMessage', populate: { path: 'sender', select: 'username' } },
+  {
+    path: 'participants',
+    select: 'username displayName avatar isOnline lastSeen publicKey privacy.showLastSeen',
+  },
+  { path: 'lastMessage', populate: { path: 'sender', select: 'username displayName avatar' } },
 ];

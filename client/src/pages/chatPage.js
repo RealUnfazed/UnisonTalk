@@ -6,6 +6,7 @@ import { SidebarView } from '../views/SidebarView.js';
 import { ChatView } from '../views/ChatView.js';
 import { ModalView } from '../views/ModalView.js';
 import { ChatController } from '../controllers/ChatController.js';
+import { ProfileController } from '../controllers/ProfileController.js';
 
 const SSO_LINK_ERROR_MESSAGES = {
   already_linked_elsewhere: 'That Phasetime account is already linked to a different UnisonTalk account.',
@@ -44,6 +45,7 @@ async function bootstrap() {
   const controller = new ChatController({ state, sidebarView, chatView, modalView, socket });
 
   controller.renderSidebar();
+  new ProfileController({ state, sidebarView, chatView, chatController: controller });
 
   $('#logout-btn').addEventListener('click', async () => {
     try {
