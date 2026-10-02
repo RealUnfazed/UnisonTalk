@@ -1,4 +1,5 @@
 import { $, $$, el } from '../utils/dom.js';
+import { nameFor } from '../utils/format.js';
 
 export class ModalView {
   constructor() {
@@ -42,7 +43,8 @@ export class ModalView {
     img.src = user.avatarUrl;
     const row = el('button', 'w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-mist text-left', [
       img,
-      el('span', 'text-sm font-medium', user.username),
+      el('span', 'text-sm font-medium', nameFor(user)),
+      ...(user.displayName ? [el('span', 'text-xs text-slate', `@${user.username}`)] : []),
     ]);
     row.type = 'button';
     row.addEventListener('click', onClick);

@@ -3,7 +3,7 @@ import { $ } from '../utils/dom.js';
 import { getSecretChatKey } from '../crypto/chatKeys.js';
 import { encryptText, decryptText, encryptBytes, decryptBytes, b64ToBuf } from '../crypto/webcrypto.js';
 import { getOrCreateIdentity } from '../crypto/identity.js';
-import { formatFileSize } from '../utils/format.js';
+import { formatFileSize, nameFor } from '../utils/format.js';
 
 // The "Controller" in this client-side MVC split: the only layer that
 // talks to AppState (the Model), the Views, the Socket.IO connection, the
@@ -56,6 +56,13 @@ export class ChatController {
   // -------------------------------------------------------------------
   // Secret Chat identity (lazy — Cloud Chats never touch this)
   // -------------------------------------------------------------------
+
+  // Per-account setting (Settings -> Media): images/files above this size
+  // don't auto-preview, they wait for an explicit click. 0 turns auto-
+  // preview off entirely.
+  autoDownloadLimitBytes() {
+    return (this.state.currentUser.autoDownloadLimitMb ?? 5) * 1024 * 1024;
+  }
 
   async ensureIdentity() {
     if (this.myIdentity) return this.myIdentity;
@@ -233,6 +240,7 @@ export class ChatController {
       isImage: !!msg.attachment.isImage,
       size: msg.attachment.size,
       url: msg.attachment.url,
+      autoPreview: msg.attachment.size == null || msg.attachment.size <= this.autoDownloadLimitBytes(),
     };
   }
 
@@ -285,7 +293,7 @@ export class ChatController {
       decryptedBlob: null,
     };
 
-    if (info.isImage) {
+    if (info.isImage && (info.size == null || info.size <= this.autoDownloadLimitBytes())) {
       try {
         const bytes = await this.fetchAndDecryptFile(msg, key);
         info.decryptedBlob = new Blob([bytes], { type: info.mimeType || 'image/png' });
@@ -544,7 +552,7 @@ export class ChatController {
       if (chatId !== this.state.activeChatId || userId === this.state.currentUser.id) return;
       const chat = this.state.chats.get(chatId);
       const user = chat ? chat.participants.find((p) => p.id === userId) : null;
-      this.chat.showTyping(user ? user.username : 'Someone');
+      this.chat.showTyping(user ? nameFor(user) : 'Someone');
 
       clearTimeout(this.typingHideTimers.get(userId));
       this.typingHideTimers.set(userId, setTimeout(() => this.chat.hideTyping(), 3000));
@@ -554,6 +562,17 @@ export class ChatController {
       if (chatId !== this.state.activeChatId) return;
       clearTimeout(this.typingHideTimers.get(userId));
       this.chat.hideTyping();
+    });
+
+    this.socket.on('chat-updated', (chat) => {
+      this.state.updateChat(chat);
+      if (chat.id === this.state.activeChatId) this.chat.renderHeader(chat, this.state.currentUser.id);
+    });
+
+    this.socket.on('user-updated', (user) => {
+      this.state.applyUserUpdate(user);
+      const active = this.state.getActiveChat();
+      if (active) this.chat.renderHeader(active, this.state.currentUser.id);
     });
 
     this.socket.on('user-online', ({ userId }) => this.applyPresence(userId, true, null));

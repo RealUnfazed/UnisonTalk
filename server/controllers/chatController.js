@@ -144,7 +144,7 @@ async function getMessages(req, res) {
   const messages = await Message.find(query)
     .sort({ createdAt: -1 })
     .limit(Math.min(Number(limit) || 30, 100))
-    .populate('sender', 'username')
+    .populate('sender', 'username displayName avatar')
     .lean();
 
   res.json(messages.reverse().map(serializeMessage));
@@ -157,11 +157,92 @@ async function searchUsers(req, res) {
   const users = await User.find({
     username: { $regex: q, $options: 'i' },
     _id: { $ne: req.session.userId },
+    // $ne: false (rather than $eq: true) matches accounts from before this
+    // field existed too, consistent with the schema's own default of true.
+    'privacy.discoverable': { $ne: false },
   })
     .limit(10)
     .lean();
 
-  res.json(users.map(serializeUser));
+  res.json(users.map((u) => serializeUser(u, req.session.userId)));
 }
 
-module.exports = { listChats, createPrivateChat, createGroupChat, getMessages, searchUsers };
+// Group name/description are editable by the group's creator only, for
+// now — see README's "Profile & group customization" section for why
+// this isn't opened up to all members in this pass.
+async function updateGroup(req, res) {
+  const { chatId } = req.params;
+  if (!mongoose.isValidObjectId(chatId)) return res.status(400).json({ error: 'Invalid chat id' });
+
+  const chat = await Chat.findOne({ _id: chatId, participants: req.session.userId });
+  if (!chat) return res.status(404).json({ error: 'Chat not found' });
+  if (!chat.isGroup) return res.status(400).json({ error: 'Only groups can be edited this way' });
+  if (!chat.admin || chat.admin.toString() !== req.session.userId) {
+    return res.status(403).json({ error: 'Only the group creator can edit this group' });
+  }
+
+  const { name, description } = req.body;
+  if (name !== undefined) {
+    const trimmed = String(name).trim();
+    if (!trimmed) return res.status(400).json({ error: 'Group name cannot be empty' });
+    if (trimmed.length > 40) return res.status(400).json({ error: 'Group name is too long (40 characters max)' });
+    chat.name = trimmed;
+  }
+  if (description !== undefined) {
+    const trimmedDesc = String(description).trim();
+    if (trimmedDesc.length > 200) {
+      return res.status(400).json({ error: 'Description is too long (200 characters max)' });
+    }
+    chat.description = trimmedDesc;
+  }
+
+  await chat.save();
+  await chat.populate(CHAT_POPULATE);
+  const chatObj = chat.toObject();
+
+  // Broadcast the update to everyone else in the group in real time —
+  // each gets their own correctly-perspective-serialized copy, same
+  // reasoning as chat-created in sockets/index.js.
+  const io = req.app.get('io');
+  chat.participants
+    .filter((p) => p._id.toString() !== req.session.userId)
+    .forEach((p) => io.to(`user:${p._id}`).emit('chat-updated', serializeChat(chatObj, p._id.toString())));
+
+  res.json(serializeChat(chatObj, req.session.userId));
+}
+
+// Group picture upload — same admin-only restriction as updateGroup.
+async function uploadGroupAvatar(req, res) {
+  const { chatId } = req.params;
+  if (!mongoose.isValidObjectId(chatId)) return res.status(400).json({ error: 'Invalid chat id' });
+  if (!req.file) return res.status(400).json({ error: 'No image received' });
+
+  const chat = await Chat.findOne({ _id: chatId, participants: req.session.userId });
+  if (!chat) return res.status(404).json({ error: 'Chat not found' });
+  if (!chat.isGroup) return res.status(400).json({ error: 'Only groups have a group picture' });
+  if (!chat.admin || chat.admin.toString() !== req.session.userId) {
+    return res.status(403).json({ error: 'Only the group creator can change the group picture' });
+  }
+
+  chat.avatar = `/uploads/avatars/${req.file.filename}`;
+  await chat.save();
+  await chat.populate(CHAT_POPULATE);
+  const chatObj = chat.toObject();
+
+  const io = req.app.get('io');
+  chat.participants
+    .filter((p) => p._id.toString() !== req.session.userId)
+    .forEach((p) => io.to(`user:${p._id}`).emit('chat-updated', serializeChat(chatObj, p._id.toString())));
+
+  res.json(serializeChat(chatObj, req.session.userId));
+}
+
+module.exports = {
+  listChats,
+  createPrivateChat,
+  createGroupChat,
+  getMessages,
+  searchUsers,
+  updateGroup,
+  uploadGroupAvatar,
+};

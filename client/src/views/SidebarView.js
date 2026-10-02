@@ -1,5 +1,5 @@
 import { $, el } from '../utils/dom.js';
-import { avatarFor, formatRelative } from '../utils/format.js';
+import { avatarFor, nameFor, chatAvatarUrl, formatRelative } from '../utils/format.js';
 
 // Views only know how to draw the DOM from data they're given, and report
 // user interactions back up via the callbacks passed into the constructor.
@@ -13,8 +13,8 @@ export class SidebarView {
   }
 
   renderMe(user) {
-    $('#me-avatar').src = avatarFor(user.username);
-    $('#me-username').textContent = user.username;
+    $('#me-avatar').src = user.avatarUrl || avatarFor(nameFor(user));
+    $('#me-username').textContent = nameFor(user);
   }
 
   render(chats, activeChatId, myUserId, previewText) {
@@ -32,7 +32,7 @@ export class SidebarView {
     const avatarWrap = el('div', 'relative shrink-0', [
       el('img', 'w-11 h-11 rounded-full object-cover'),
     ]);
-    avatarWrap.firstChild.src = chat.isGroup ? avatarFor(chat.name || 'Group') : other?.avatarUrl || avatarFor(chat.name);
+    avatarWrap.firstChild.src = chatAvatarUrl(chat, myUserId);
 
     if (other) {
       const dot = el('span');
@@ -70,7 +70,7 @@ export class SidebarView {
   previewFor(chat, myUserId, previewText) {
     if (!chat.lastMessage) return chat.isGroup ? 'No messages yet — say hello' : 'Say hello 👋';
     const who =
-      chat.lastMessage.sender.id === myUserId ? 'You: ' : chat.isGroup ? `${chat.lastMessage.sender.username}: ` : '';
+      chat.lastMessage.sender.id === myUserId ? 'You: ' : chat.isGroup ? `${nameFor(chat.lastMessage.sender)}: ` : '';
     if (chat.lastMessage.attachment) return `${who}📎 Attachment`;
 
     // Decryption is async and happens off in the Controller; until that

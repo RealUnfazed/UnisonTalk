@@ -219,6 +219,15 @@ UnisonTalk can optionally support signing in via [Phasetime SSO](https://github.
 
 None of this touches Cloud vs. Secret Chats — a Phasetime-authenticated account works exactly like a normal one everywhere else in the app once signed in.
 
+## Profile & group customization
+
+- **Profile:** an uploaded profile picture (falls back to a generated one), and a display name separate from the fixed, unique `username` (search and starting chats still key off the username; everywhere a name is *shown* uses the display name).
+- **Groups:** name, description, and picture — editable by the group's creator only; everyone can view them, and changes appear for other members in real time.
+- **Privacy:** *show my last seen & online status* (off = others see "last seen recently", no online dot, and no presence events are even broadcast for you) and *let people find me by username* (off = excluded from search; existing chats and exact-username lookups are unaffected).
+- **Media:** an auto-preview size limit (0 turns it off) applied to image attachments in both Cloud and Secret Chats — anything larger waits for an explicit click.
+
+Deliberately simpler than Telegram: no "My Contacts" tier (there's no contacts list to key one off), last-seen privacy isn't reciprocal (hiding yours doesn't hide others' from you), and there's no separate profile-picture or "who can add me to groups" toggle yet. All good candidates for follow-up work.
+
 ## Notes & possible extensions
 
 - Cloud Chat attachments and Secret Chat ciphertext both live on local disk (`server/uploads/`) via Multer — fine for learning/dev; swap in S3/Cloud Storage for production.
