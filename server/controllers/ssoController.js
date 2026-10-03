@@ -148,7 +148,7 @@ async function handleCallback(req, res) {
 }
 
 async function unlink(req, res) {
-  const user = await User.findByIdAndUpdate(req.session.userId, { phasetimeId: null }, { new: true }).select(
+  const user = await User.findByIdAndUpdate(req.session.userId, { $unset: { phasetimeId: 1 } }, { new: true }).select(
     '-password'
   );
   res.json({ user: serializeUser(user, req.session.userId) });
