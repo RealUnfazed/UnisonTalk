@@ -37,16 +37,15 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // Set once a person signs in with (or links) Phasetime SSO —
-    // see controllers/ssoController.js and README.md's "Phasetime SSO"
-    // section. `sparse: true` lets any number of accounts have this
-    // unset (null) without violating the uniqueness constraint; only
-    // actual Phasetime IDs need to be unique.
+    // Set once a person signs in with (or links) Phasetime SSO — see
+    // controllers/ssoController.js. Deliberately NO default: accounts
+    // without a link simply don't have this field at all. (It used to
+    // default to null with a `sparse` unique index, but sparse indexes
+    // only skip *missing* fields, not null ones — so the second account
+    // without a Phasetime link hit E11000 duplicate key on null. The
+    // uniqueness rule now lives in a partial index below.)
     phasetimeId: {
       type: String,
-      default: null,
-      unique: true,
-      sparse: true,
     },
     isOnline: {
       type: Boolean,
@@ -99,6 +98,16 @@ const userSchema = new mongoose.Schema(
     },
   },
   { timestamps: true }
+);
+
+// Unique only among accounts that actually have a Phasetime ID — null /
+// missing values aren't indexed at all, so any number of accounts can go
+// without one. Named explicitly so it can't collide with the legacy
+// `phasetimeId_1` index that older databases have (dropped on startup by
+// config/db.js).
+userSchema.index(
+  { phasetimeId: 1 },
+  { name: 'phasetimeId_unique_partial', unique: true, partialFilterExpression: { phasetimeId: { $type: 'string' } } }
 );
 
 // Hash the password whenever it is created or changed, never store it in plain text.
