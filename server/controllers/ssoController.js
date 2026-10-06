@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const { serializeUser } = require('../utils/serialize');
 const { getPhasetimeConfig } = require('../config/phasetime');
+const { sanitizeUsernameBase } = require('../utils/username');
 
 // Lets the client show/hide "Continue with Phasetime" without hardcoding
 // it — this is the only SSO endpoint that isn't itself gated by
@@ -158,12 +159,7 @@ async function unlink(req, res) {
 // Phasetime reports (which has no format guarantees at all — spaces,
 // unicode, punctuation, anything).
 async function generateUniqueUsername(rawName) {
-  let base = (rawName || 'user')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '') // strip accents so e.g. "José" -> "Jose", not dropped entirely
-    .replace(/[^a-zA-Z0-9_]/g, '')
-    .slice(0, 20);
-  if (base.length < 3) base = `${base}user`.slice(0, 20);
+  const base = sanitizeUsernameBase(rawName);
 
   let username = base;
   let suffix = 0;

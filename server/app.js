@@ -27,11 +27,12 @@ function createApp() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  const sessionStore = MongoStore.create({ mongoUrl: process.env.MONGODB_URI });
   const sessionMiddleware = session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI }),
+    store: sessionStore,
     cookie: {
       maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
       httpOnly: true,
@@ -76,7 +77,7 @@ function createApp() {
     res.status(404).sendFile(path.join(__dirname, '..', 'client', 'public', '404.html'));
   });
 
-  return { app, sessionMiddleware };
+  return { app, sessionMiddleware, sessionStore };
 }
 
 module.exports = createApp;

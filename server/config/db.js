@@ -50,3 +50,4 @@ async function migratePhasetimeIndex() {
 }
 
 module.exports = connectDB;
+module.exports.migratePhasetimeIndex = migratePhasetimeIndex;

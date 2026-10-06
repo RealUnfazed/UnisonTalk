@@ -49,7 +49,7 @@ This project follows a [Code of Conduct](./CODE_OF_CONDUCT.md). By participating
    - Comments should explain *why*, not restate *what* the code does — `server/sockets/index.js` and `client/src/crypto/webcrypto.js` are good references for the level of detail expected, especially anywhere touching encryption.
 4. This is a genuinely separated client/server app — see the "How the client/server separation works" section in the README. If you touch a data model (`server/models/`) or a socket event (`server/sockets/index.js`), check the corresponding client code (`client/src/controllers/ChatController.js` usually) — the two are easy to get out of sync.
 5. **If you touch anything in `client/src/crypto/`, read the "Security model" section in the README first**, and say explicitly in your PR description what security property (if any) your change affects. Crypto code gets extra scrutiny here, not because contributions aren't welcome, but because subtle mistakes in this area are easy to make and hard to notice.
-6. There's no automated test suite yet (see "Good first issues" below if you'd like to help with that). At minimum, run the app locally and manually verify your change — for anything touching encryption, verify with **two separate accounts** that both sending and receiving still decrypt correctly.
+6. Run `npm test` before opening a PR (see "Testing" in the README) — new behavior and bug fixes should come with a test. Then run the app locally and manually verify your change — for anything touching encryption, verify with **two separate accounts** that both sending and receiving still decrypt correctly.
 7. Before opening a PR, sanity-check any file you touched:
    ```bash
    # server files (CommonJS)
@@ -79,7 +79,7 @@ If you're looking for a place to start, these are areas the project could use he
 - Swapping local-disk attachment storage for S3-compatible storage
 - Encrypting Cloud Chat attachment *files* on disk with `CLOUD_ENCRYPTION_KEY` (currently only message text and filenames get this treatment via `server/utils/fieldCrypto.js` — the files themselves in `server/uploads/` are plain, unlike Secret Chat attachments which are ciphertext client-side already)
 - A `CLOUD_ENCRYPTION_KEY` rotation script (decrypt everything under the old key, re-encrypt under a new one) — there's currently no way to rotate this key without making existing Cloud Chat messages unreadable
-- An automated test suite (currently none exists) — the crypto module (`client/src/crypto/`) especially would benefit from unit tests that verify encrypt→decrypt round-trips
+- More tests: Socket.IO-level tests (encryption at rest on the message write path, first-message chat visibility, presence privacy) and browser-level tests of the client UI
 - Accessibility passes on the chat UI (keyboard navigation, screen reader labels)
 - Rate limiting on login/register/message-sending
 - Additional SSO providers beyond Phasetime (`server/controllers/ssoController.js` is a fairly self-contained reference for what a provider integration needs — config, authorize redirect, callback, account create-or-link)

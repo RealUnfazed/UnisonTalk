@@ -35,6 +35,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [How the real-time architecture works](#how-the-real-time-architecture-works)
 - [Phasetime SSO (optional)](#phasetime-sso-optional)
 - [Notes & possible extensions](#notes--possible-extensions)
+- [Testing](#testing)
 - [Contributing](#contributing)
 - [License](#license)
 - [Author](#author)
@@ -234,6 +235,20 @@ Deliberately simpler than Telegram: no "My Contacts" tier (there's no contacts l
 - There's no read-receipt/unread-count system yet.
 - There's no way to add a member to an existing group or change a group's membership after creation.
 - See [Security model](#security-model) above and [SECURITY.md](./SECURITY.md) for what to review before deploying this publicly.
+
+## Testing
+
+```bash
+npm install
+npm test                 # unit + integration
+npm run test:unit        # fast, no database
+npm run test:integration # boots the real app against an in-memory MongoDB
+npm run check            # syntax-check every file (also runs first in CI)
+```
+
+Tests use Node's built-in runner (no Jest). **Unit tests** cover the crypto (Secret Chat encrypt/decrypt, key export/import, tamper detection; Cloud encryption at rest), the serializers (privacy rules, per-viewer chat naming, decrypt-on-read) and username sanitisation. **Integration tests** drive the real Express app with `supertest` against `mongodb-memory-server` (it downloads a `mongod` binary on first run), covering registration/login, the Phasetime flow against a mock provider (including CSRF/state handling, linking, unlinking), profile/privacy/search, chat visibility and group editing. They include regressions for real bugs found so far — e.g. issue #14 (duplicate `phasetimeId: null`) and the wrong-name-for-the-recipient chat bug. GitHub Actions runs everything on Node 20 and 22.
+
+Not covered yet: the Socket.IO layer (encryption-at-rest on the actual message write path, first-message chat notification, presence broadcasts) and the browser UI.
 
 ## Contributing
 
