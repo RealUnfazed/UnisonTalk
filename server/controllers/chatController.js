@@ -8,6 +8,7 @@ const { visibleToMe } = require('../utils/chatVisibility');
 const path = require('path');
 const { escapeRegex } = require('../utils/escapeRegex');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
+const { blockStatus } = require('../utils/blocks');
 const { markChatRead } = require('../utils/readState');
 const { discardUploadedFile, deleteAvatarFile } = require('../utils/uploadCleanup');
 
@@ -83,6 +84,12 @@ async function createPrivateChat(req, res) {
 
     let created = false;
     if (!chat) {
+      // Starting a NEW chat with someone who is blocked (either direction)
+      // isn't allowed; an existing chat stays openable so history isn't lost.
+      const { iBlocked, theyBlocked } = await blockStatus(req.session.userId, other._id);
+      if (iBlocked) return res.status(403).json({ error: 'You blocked this person. Unblock them to start a chat.' });
+      if (theyBlocked) return res.status(403).json({ error: "You can't message this person." });
+
       chat = await Chat.create({
         isGroup: false,
         isSecret: !!isSecret,
@@ -118,12 +125,34 @@ async function createGroupChat(req, res) {
       return res.status(400).json({ error: 'Invalid member list' });
     }
 
-    const members = await User.find({ username: { $in: usernames } });
+    // Not everyone can be added: people you've blocked, people who blocked
+    // you, and people who turned off group invites are skipped (and reported
+    // back). "They blocked you" and "they don't accept invites" share one
+    // reason so this can't be used to discover who blocked you.
+    const [found, me] = await Promise.all([
+      User.find({ username: { $in: usernames } }).select('username blocked privacy.groupInvites'),
+      User.findById(req.session.userId).select('blocked').lean(),
+    ]);
+    const iBlocked = new Set(((me && me.blocked) || []).map(String));
+    const skipped = [];
+    const members = found.filter((u) => {
+      const id = u._id.toString();
+      if (id === req.session.userId) return false;
+      if (iBlocked.has(id)) {
+        skipped.push({ username: u.username, reason: 'blocked' });
+        return false;
+      }
+      if (u.privacy?.groupInvites === false || (u.blocked || []).some((b) => b.toString() === req.session.userId)) {
+        skipped.push({ username: u.username, reason: 'privacy' });
+        return false;
+      }
+      return true;
+    });
     const memberIds = members.map((m) => m._id);
     const participantSet = new Set([req.session.userId, ...memberIds.map((id) => id.toString())]);
 
     if (participantSet.size < 2) {
-      return res.status(400).json({ error: 'Add at least one other valid member' });
+      return res.status(400).json({ error: 'Add at least one other valid member', skipped });
     }
 
     let chat = await Chat.create({
@@ -144,7 +173,7 @@ async function createGroupChat(req, res) {
     const io = req.app.get('io');
     memberIds.forEach((id) => io.to(`user:${id}`).emit('chat-created', serialized));
 
-    res.status(201).json(serialized);
+    res.status(201).json({ ...serialized, skipped });
   } catch (err) {
     console.error('[chat] group chat failed:', err.message);
     res.status(500).json({ error: 'Could not create group' });
@@ -190,9 +219,12 @@ async function searchUsers(req, res) {
   if (!q) return res.json([]);
   const escaped = escapeRegex(q);
 
+  // Hidden both ways: people I've blocked, and people who've blocked me.
+  const me = await User.findById(req.session.userId).select('blocked').lean();
   const users = await User.find({
     username: { $regex: escaped, $options: 'i' },
-    _id: { $ne: req.session.userId },
+    _id: { $ne: req.session.userId, $nin: (me && me.blocked) || [] },
+    blocked: { $ne: req.session.userId },
     // $ne: false (rather than $eq: true) matches accounts from before this
     // field existed too, consistent with the schema's own default of true.
     'privacy.discoverable': { $ne: false },

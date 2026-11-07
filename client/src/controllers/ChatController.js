@@ -4,6 +4,7 @@ import { getSecretChatKey } from '../crypto/chatKeys.js';
 import { encryptText, decryptText, encryptBytes, decryptBytes, b64ToBuf } from '../crypto/webcrypto.js';
 import { getOrCreateIdentity } from '../crypto/identity.js';
 import { formatFileSize, nameFor } from '../utils/format.js';
+import { loadNotifySettings, notificationFor } from '../utils/notify.js';
 
 // The "Controller" in this client-side MVC split: the only layer that
 // talks to AppState (the Model), the Views, the Socket.IO connection, the
@@ -312,6 +313,64 @@ export class ChatController {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Blocking, leaving, notifications
+  // ------------------------------------------------------------------
+
+  isBlockedByMe(chat) {
+    if (chat.isGroup) return false;
+    const other = chat.participants.find((p) => p.id !== this.state.currentUser.id);
+    return Boolean(other && (this.state.currentUser.blockedIds || []).includes(other.id));
+  }
+
+  // A private chat with someone I've blocked: say so and lock the composer
+  // (the server would refuse the message anyway). Called when a chat opens
+  // and whenever a block changes.
+  applyBlockState(chat) {
+    const blocked = this.isBlockedByMe(chat);
+    const input = $('#message-input');
+    if (!input.dataset.placeholder) input.dataset.placeholder = input.placeholder;
+    input.disabled = blocked;
+    input.placeholder = blocked ? 'You blocked this person' : input.dataset.placeholder;
+    const form = input.closest('form');
+    if (form) form.querySelectorAll('button').forEach((b) => { b.disabled = blocked; });
+
+    $('#blocked-banner').classList.toggle('hidden', !blocked);
+    if (blocked) {
+      const other = chat.participants.find((p) => p.id !== this.state.currentUser.id);
+      $('#blocked-banner-text').textContent = `You blocked ${nameFor(other)}.`;
+    }
+  }
+
+  // I was removed from a group, left it, or it was deleted: it disappears here.
+  dropChat(chatId) {
+    const wasActive = this.state.activeChatId === chatId;
+    this.state.removeChat(chatId);
+    this.updateTitleBadge();
+    if (wasActive) {
+      this.cancelComposerContext();
+      this.chat.showEmptyState();
+    }
+  }
+
+  notifyNewMessage(msg, chat) {
+    const note = notificationFor({
+      msg,
+      chat,
+      myUserId: this.state.currentUser.id,
+      settings: loadNotifySettings(),
+      tabVisible: document.visibilityState === 'visible',
+      activeChatId: this.state.activeChatId,
+    });
+    if (!note || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const popup = new Notification(note.title, { body: note.body, tag: note.tag, icon: msg.sender.avatarUrl });
+    popup.onclick = () => {
+      window.focus();
+      this.openChat(msg.chatId);
+      popup.close();
+    };
+  }
+
   async openChat(chatId) {
     this.state.setActiveChat(chatId);
     const chat = this.state.chats.get(chatId);
@@ -320,6 +379,7 @@ export class ChatController {
     this.cancelComposerContext(); // a half-written reply/edit belongs to the previous chat
     this.markRead(chatId);
     this.chat.showActiveChat();
+    this.applyBlockState(chat);
     this.renderSidebar();
     this.chat.renderHeader(chat, this.state.currentUser.id);
     this.chat.hideTyping();
@@ -751,6 +811,7 @@ export class ChatController {
         if (msg.chatId === this.state.activeChatId && document.visibilityState === 'visible') this.markRead(msg.chatId);
         else this.state.bumpUnread(msg.chatId);
       }
+      if (chat) this.notifyNewMessage(msg, chat);
 
       if (msg.chatId === this.state.activeChatId) {
         try {
@@ -766,6 +827,8 @@ export class ChatController {
         if (msg.sender.id !== this.state.currentUser.id) this.chat.hideTyping();
       }
     });
+
+    this.socket.on('chat-removed', ({ chatId }) => this.dropChat(chatId));
 
     this.socket.on('chat-created', (chat) => {
       if (this.state.chats.has(chat.id)) return;
@@ -913,6 +976,9 @@ export class ChatController {
       this.modal.closeNewGroupModal();
       this.groupSelected.clear();
       this.openChat(chat.id);
+      if (chat.skipped && chat.skipped.length) {
+        alert(`Group created, but couldn't add: ${chat.skipped.map((s) => s.username).join(', ')} (blocked, or their privacy settings).`);
+      }
     } catch (err) {
       alert(err.message);
     }

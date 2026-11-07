@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const { sanitizeAttachment } = require('../utils/validateAttachment');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
 const { setReadMarker, markChatRead } = require('../utils/readState');
+const { blockedBetween, presentableRooms } = require('../utils/blocks');
 
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
 const isId = (v) => typeof v === 'string' && mongoose.isValidObjectId(v);
@@ -60,7 +61,7 @@ async function handleConnection(io, socket) {
       'privacy.showLastSeen'
     );
     if (updatedUser?.privacy?.showLastSeen !== false) {
-      broadcastPresence(io, presenceRooms(socket), 'user-online', { userId });
+      broadcastPresence(io, await presentableRooms(userId, presenceRooms(socket), Chat), 'user-online', { userId });
     }
   }
 
@@ -121,6 +122,12 @@ async function handleConnection(io, socket) {
       if (!isId(chatId)) return ack?.({ error: 'Invalid chat' });
       const chat = await Chat.findOne({ _id: chatId, participants: userId });
       if (!chat) return ack?.({ error: 'Not a participant of that chat' });
+
+      // A block, in either direction, stops delivery in a private chat.
+      if (!chat.isGroup) {
+        const otherId = chat.participants.find((p) => p.toString() !== userId);
+        if (otherId && (await blockedBetween(userId, otherId))) return ack?.({ error: "You can't message this person." });
+      }
 
       if (content != null && typeof content !== 'string') return ack?.({ error: 'Invalid message' });
       if (ciphertext != null && (typeof ciphertext !== 'string' || ciphertext.length > 16384)) return ack?.({ error: 'Invalid message' });
@@ -236,9 +243,9 @@ async function handleConnection(io, socket) {
 
       User.findByIdAndUpdate(userId, { isOnline: false, lastSeen }, { new: true })
         .select('privacy.showLastSeen')
-        .then((updatedUser) => {
+        .then(async (updatedUser) => {
           if (updatedUser?.privacy?.showLastSeen !== false) {
-            broadcastPresence(io, rooms, 'user-offline', { userId, lastSeen });
+            broadcastPresence(io, await presentableRooms(userId, rooms, Chat), 'user-offline', { userId, lastSeen });
           }
         })
         .catch((err) => console.error('[socket] failed to mark offline:', err.message));

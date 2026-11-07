@@ -48,7 +48,7 @@ async function startTestApp({ sockets = false } = {}) {
   } else {
     app.set('io', {
       to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }),
-      in: () => ({ socketsJoin() {} }),
+      in: () => ({ socketsJoin() {}, socketsLeave() {} }),
     });
   }
 

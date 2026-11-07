@@ -61,6 +61,13 @@ export class AppState extends EventTarget {
     this.emit('presence:changed', { userId, isOnline, lastSeen });
   }
 
+  // The chat is gone for this person (removed from a group, left it, or it was deleted).
+  removeChat(chatId) {
+    this.chats.delete(chatId);
+    if (this.activeChatId === chatId) this.activeChatId = null;
+    this.emit('chats:changed');
+  }
+
   // Unread badge + read-receipt bookkeeping -----------------------------
   setUnread(chatId, n) {
     const chat = this.chats.get(chatId);

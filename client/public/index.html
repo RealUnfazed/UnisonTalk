@@ -120,6 +120,10 @@
           </span>
         </div>
 
+        <div id="blocked-banner" class="hidden mx-6 mb-2 px-3 py-2 bg-ember/10 border border-ember/20 rounded-lg text-sm flex items-center justify-between gap-3">
+          <span id="blocked-banner-text" class="text-ember"></span>
+          <button id="blocked-banner-unblock" type="button" class="text-xs font-semibold text-ember hover:underline">Unblock</button>
+        </div>
         <div id="compose-context" class="hidden mx-6 mb-2 px-3 py-2 bg-white border border-black/10 border-l-4 border-l-harmony rounded-lg flex items-center justify-between gap-3">
           <div class="min-w-0">
             <p id="compose-context-title" class="text-xs font-semibold text-harmony"></p>
@@ -194,6 +198,20 @@
     </div>
   </div>
 
+  <!-- ============ Contact info modal ============ -->
+  <div id="contact-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
+      <div class="flex justify-end -mb-2">
+        <button data-close-modal class="text-slate hover:text-ink"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <img id="contact-avatar" src="" alt="" class="w-20 h-20 rounded-full object-cover mx-auto mb-3" />
+      <h2 id="contact-name" class="font-display font-semibold text-lg"></h2>
+      <p id="contact-username" class="text-xs text-slate"></p>
+      <p id="contact-status" class="text-xs text-slate mb-5"></p>
+      <button id="contact-block-btn" type="button" class="w-full text-sm font-medium rounded-lg py-2.5"></button>
+    </div>
+  </div>
+
   <!-- ============ Message actions menu ============ -->
   <div id="msg-menu" class="hidden fixed z-40 w-44 bg-white rounded-xl shadow-xl border border-black/10 py-1 text-sm">
     <button id="msg-menu-reply" type="button" class="w-full text-left px-3.5 py-2 hover:bg-mist flex items-center gap-2.5"><i class="fa-solid fa-reply w-4 text-slate"></i> Reply</button>
@@ -241,9 +259,27 @@
         <span class="text-sm text-ink">Send read receipts<br><span class="text-xs text-slate">When off, others never see the double tick for your reads. Your own unread counts still work.</span></span>
       </label>
 
+      <label class="flex items-start gap-3 mb-5 cursor-pointer">
+        <input id="settings-group-invites" type="checkbox" class="mt-1 accent-[#D9A62E]" />
+        <span class="text-sm text-ink">Let people add me to groups<br><span class="text-xs text-slate">When off, no one can add you to a group. People you've blocked never can.</span></span>
+      </label>
+
       <p class="text-xs font-semibold text-slate mb-2">Media</p>
       <label class="block text-sm text-ink mb-1">Auto-preview images up to: <span id="settings-autodownload-label" class="font-medium"></span></label>
       <input id="settings-autodownload" type="range" min="0" max="50" step="1" class="w-full mb-6 accent-[#D9A62E]" />
+
+      <p class="text-xs font-semibold text-slate mb-2">Notifications (this browser)</p>
+      <label class="flex items-start gap-3 mb-3 cursor-pointer">
+        <input id="settings-notify" type="checkbox" class="mt-1 accent-[#D9A62E]" />
+        <span class="text-sm text-ink">Desktop notifications<br><span class="text-xs text-slate">For messages in chats you're not looking at. Secret Chats never show their text.</span></span>
+      </label>
+      <label class="flex items-start gap-3 mb-5 cursor-pointer">
+        <input id="settings-notify-preview" type="checkbox" class="mt-1 accent-[#D9A62E]" />
+        <span class="text-sm text-ink">Show message previews</span>
+      </label>
+
+      <p class="text-xs font-semibold text-slate mb-2">Blocked people</p>
+      <div id="settings-blocked-list" class="space-y-1 mb-6"></div>
 
       <button id="settings-save" type="button" class="w-full bg-ink text-white text-sm font-medium rounded-lg py-2.5 hover:bg-ink-light transition-colors">Save changes</button>
     </div>
@@ -273,7 +309,14 @@
       <p id="group-readonly-note" class="hidden text-xs text-slate mb-3">Only the group's creator can edit this.</p>
       <p class="text-xs font-semibold text-slate mb-2">Members</p>
       <div id="group-members" class="space-y-1 mb-4 max-h-48 overflow-y-auto"></div>
+      <div id="group-add-row" class="hidden mb-4">
+        <div class="flex gap-2">
+          <input id="group-add-input" type="text" placeholder="Add people by username (comma-separated)" class="flex-1 border border-black/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/50 focus:border-signal" />
+          <button id="group-add-btn" type="button" class="px-3 py-2 rounded-lg bg-mist text-sm font-medium hover:bg-black/5">Add</button>
+        </div>
+      </div>
       <button id="group-save" type="button" class="w-full bg-ink text-white text-sm font-medium rounded-lg py-2.5 hover:bg-ink-light transition-colors">Save group</button>
+      <button id="group-leave-btn" type="button" class="w-full mt-2 text-sm font-medium rounded-lg py-2.5 text-ember bg-ember/10 hover:bg-ember/20 transition-colors">Leave group</button>
     </div>
   </div>
 

@@ -10,7 +10,7 @@ const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
 // one route per field — the client only ever sends the fields that
 // actually changed (see client/src/controllers/ProfileController.js).
 async function updateProfile(req, res) {
-  const { displayName, privacyShowLastSeen, privacyDiscoverable, privacyReadReceipts, autoDownloadLimitMb } = req.body;
+  const { displayName, privacyShowLastSeen, privacyDiscoverable, privacyReadReceipts, privacyGroupInvites, autoDownloadLimitMb } = req.body;
   const update = {};
 
   if (displayName !== undefined) {
@@ -24,6 +24,7 @@ async function updateProfile(req, res) {
     [privacyShowLastSeen, 'privacy.showLastSeen'],
     [privacyDiscoverable, 'privacy.discoverable'],
     [privacyReadReceipts, 'privacy.readReceipts'],
+    [privacyGroupInvites, 'privacy.groupInvites'],
   ]) {
     if (value === undefined) continue;
     if (typeof value !== 'boolean') return res.status(400).json({ error: 'Privacy settings must be true or false' });

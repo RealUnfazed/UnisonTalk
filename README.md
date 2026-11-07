@@ -35,6 +35,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [How the real-time architecture works](#how-the-real-time-architecture-works)
 - [Phasetime SSO (optional)](#phasetime-sso-optional)
 - [Notes & possible extensions](#notes--possible-extensions)
+- [Groups, blocking & notifications](#groups-blocking--notifications)
 - [Messages, read state & unread counts](#messages-read-state--unread-counts)
 - [Security hardening](#security-hardening)
 - [Testing](#testing)
@@ -237,6 +238,14 @@ Deliberately simpler than Telegram: no "My Contacts" tier (there's no contacts l
 - There's no read-receipt/unread-count system yet.
 - There's no way to add a member to an existing group or change a group's membership after creation.
 - See [Security model](#security-model) above and [SECURITY.md](./SECURITY.md) for what to review before deploying this publicly.
+
+## Groups, blocking & notifications
+
+- **Managing a group:** open the group (click its header). The creator can add people by username, remove members, and transfer ownership; anyone can leave. If the creator leaves, the longest-standing remaining member becomes the owner; when the last member leaves, the group and its messages are deleted. New members can read the history but start with nothing unread. Removed members stop receiving messages immediately and the chat disappears for them.
+- **Who can be added:** people you've blocked, people who blocked you, and people who turned off *Let people add me to groups* are skipped, and you're told who was skipped. "They blocked you" and "they accept no invites" deliberately look identical, so adding people can't be used to find out who has blocked you.
+- **Blocking:** from a private chat's header (contact info), a group's member list, or Settings → Blocked people. A block stops the other person from starting a chat with you or messaging you (the blocker can't send either until they unblock), hides you from each other's search, and hides each other's online status in private chats. Existing chats and history stay. Known limits: starting a chat with someone who blocked you says "you can't message this person" (it can't stay silent without faking delivery); in a *shared group* the blocked person can still see your presence and typing; blocking doesn't remove anyone from groups you share.
+- **Desktop notifications** (Settings → Notifications, per browser): shown for messages in chats you're not looking at. *Secret Chat text is never put in a notification* — they only say "New message" — and you can turn previews off for Cloud Chats too. There's no per-chat mute yet.
+- **Not yet:** service messages in groups ("X was added"), admin roles other than the creator, join links, per-chat mute.
 
 ## Messages, read state & unread counts
 

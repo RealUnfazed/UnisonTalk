@@ -40,7 +40,7 @@ describe('profile, privacy & search', () => {
     it('stores privacy and media settings and returns them to the owner', async () => {
       const res = await alice.patch('/api/users/me')
         .send({ privacyShowLastSeen: false, privacyDiscoverable: false, autoDownloadLimitMb: 0 }).expect(200);
-      assert.deepEqual(res.body.user.privacy, { showLastSeen: false, discoverable: false, readReceipts: true });
+      assert.deepEqual(res.body.user.privacy, { showLastSeen: false, discoverable: false, readReceipts: true, groupInvites: true });
       assert.equal(res.body.user.autoDownloadLimitMb, 0);
       const me = await alice.get('/api/auth/me').expect(200);
       assert.equal(me.body.user.privacy.showLastSeen, false);

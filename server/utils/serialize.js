@@ -12,7 +12,9 @@ const { decryptField } = require('./fieldCrypto');
 function serializeUser(user, viewerId) {
   if (!user) return null;
   const isSelf = Boolean(viewerId) && user._id.toString() === viewerId;
-  const showPresence = isSelf || user.privacy?.showLastSeen !== false;
+  // Someone who has blocked the viewer never sees their presence either.
+  const blockedViewer = Boolean(viewerId) && !isSelf && (user.blocked || []).some((b) => b.toString() === viewerId);
+  const showPresence = isSelf || (user.privacy?.showLastSeen !== false && !blockedViewer);
 
   return {
     id: user._id.toString(),
@@ -38,8 +40,10 @@ function serializeUser(user, viewerId) {
             showLastSeen: user.privacy?.showLastSeen !== false,
             discoverable: user.privacy?.discoverable !== false,
             readReceipts: user.privacy?.readReceipts !== false,
+            groupInvites: user.privacy?.groupInvites !== false,
           },
           autoDownloadLimitMb: user.autoDownloadLimitMb ?? 5,
+          blockedIds: (user.blocked || []).map((b) => b.toString()),
         }
       : {}),
   };

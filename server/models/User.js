@@ -90,7 +90,13 @@ const userSchema = new mongoose.Schema(
       // tick). Off = your reads are still tracked for your own unread
       // badges, but never broadcast or exposed.
       readReceipts: { type: Boolean, default: true },
+      // Whether other people can add you to groups. Deliberately Everyone /
+      // Nobody (not Telegram's middle "My Contacts" tier — there's no
+      // contacts list). Anyone you've blocked can never add you either way.
+      groupInvites: { type: Boolean, default: true },
     },
+    // Accounts this one has blocked (see controllers/blockController.js).
+    blocked: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     // Images/files above this size won't auto-preview inline — see
     // client/src/controllers/ChatController.js's use of this alongside
     // attachment.size. Applies to both Cloud and Secret Chat attachments.
