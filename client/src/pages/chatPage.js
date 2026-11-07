@@ -46,6 +46,7 @@ async function bootstrap() {
 
   controller.renderSidebar();
   new ProfileController({ state, sidebarView, chatView, chatController: controller });
+  controller.wireMessageMenu();
 
   $('#logout-btn').addEventListener('click', async () => {
     try {

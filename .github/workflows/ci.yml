@@ -23,3 +23,15 @@ jobs:
       - run: npm run check
       - run: npm run test:unit
       - run: npm run test:integration
+
+  audit:
+    # Informational: surfaces known-vulnerable dependencies without blocking merges.
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --package-lock-only
+      - run: npm audit --audit-level=high

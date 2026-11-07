@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { serializeUser } = require('../utils/serialize');
 const { getPhasetimeConfig } = require('../config/phasetime');
 const { sanitizeUsernameBase } = require('../utils/username');
+const { establishSession } = require('../utils/session');
 
 // Lets the client show/hide "Continue with Phasetime" without hardcoding
 // it — this is the only SSO endpoint that isn't itself gated by
@@ -140,7 +141,7 @@ async function handleCallback(req, res) {
       });
     }
 
-    req.session.userId = user._id.toString();
+    await establishSession(req, user._id.toString()); // fresh session ID at the moment of login
     res.redirect('/');
   } catch (err) {
     console.error('[sso] callback failed:', err.message);

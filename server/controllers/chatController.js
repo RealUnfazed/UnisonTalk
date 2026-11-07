@@ -5,13 +5,40 @@ const User = require('../models/User');
 const { serializeChat, serializeMessage, serializeUser } = require('../utils/serialize');
 const CHAT_POPULATE = require('../utils/chatPopulate');
 const { visibleToMe } = require('../utils/chatVisibility');
+const path = require('path');
+const { escapeRegex } = require('../utils/escapeRegex');
+const MESSAGE_POPULATE = require('../utils/messagePopulate');
+const { markChatRead } = require('../utils/readState');
+const { discardUploadedFile, deleteAvatarFile } = require('../utils/uploadCleanup');
+
+const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
 
 async function listChats(req, res) {
   const chats = await Chat.find({ participants: req.session.userId, ...visibleToMe(req.session.userId) })
     .populate(CHAT_POPULATE)
     .sort({ updatedAt: -1 })
     .lean();
-  res.json(chats.map((c) => serializeChat(c, req.session.userId)));
+  const unread = await Promise.all(chats.map((c) => unreadFor(c, req.session.userId)));
+  res.json(chats.map((c, i) => serializeChat(c, req.session.userId, unread[i])));
+}
+
+// Messages from other people, still present, newer than this person's read
+// marker. Capped at 100 so a huge backlog stays a cheap index scan; the UI
+// shows "99+" anyway. (A chat they've never opened has no marker, so all of
+// it counts — including, once, history from before read tracking existed.)
+function unreadFor(chat, userId) {
+  const mine = (chat.reads || []).find((r) => r.user.toString() === userId);
+  const filter = { chat: chat._id, sender: { $ne: userId }, deletedAt: null };
+  if (mine) filter.createdAt = { $gt: mine.at };
+  return Message.countDocuments(filter, { limit: 100 });
+}
+
+async function markRead(req, res) {
+  const { chatId } = req.params;
+  if (!mongoose.isValidObjectId(chatId)) return res.status(400).json({ error: 'Invalid chat id' });
+  const at = await markChatRead({ chatId, userId: req.session.userId, io: req.app.get('io') });
+  if (!at) return res.status(404).json({ error: 'Chat not found' });
+  res.status(204).end();
 }
 
 // Find-or-create a 1:1 chat with another user by username. `isSecret`
@@ -33,7 +60,9 @@ async function listChats(req, res) {
 async function createPrivateChat(req, res) {
   try {
     const { username, isSecret } = req.body;
-    if (!username) return res.status(400).json({ error: 'username is required' });
+    if (typeof username !== 'string' || !username.trim()) {
+      return res.status(400).json({ error: 'username is required' });
+    }
 
     const other = await User.findOne({ username: username.trim() });
     if (!other) return res.status(404).json({ error: 'No user with that username' });
@@ -81,8 +110,12 @@ async function createPrivateChat(req, res) {
 async function createGroupChat(req, res) {
   try {
     const { name, usernames } = req.body;
-    if (!name || !Array.isArray(usernames) || usernames.length === 0) {
+    if (typeof name !== 'string' || !name.trim() || !Array.isArray(usernames) || usernames.length === 0) {
       return res.status(400).json({ error: 'name and at least one member are required' });
+    }
+    if (name.trim().length > 40) return res.status(400).json({ error: 'Group name is too long (40 characters max)' });
+    if (usernames.length > 100 || !usernames.every((u) => typeof u === 'string')) {
+      return res.status(400).json({ error: 'Invalid member list' });
     }
 
     const members = await User.find({ username: { $in: usernames } });
@@ -144,18 +177,21 @@ async function getMessages(req, res) {
   const messages = await Message.find(query)
     .sort({ createdAt: -1 })
     .limit(Math.min(Number(limit) || 30, 100))
-    .populate('sender', 'username displayName avatar')
+    .populate(MESSAGE_POPULATE)
     .lean();
 
   res.json(messages.reverse().map(serializeMessage));
 }
 
 async function searchUsers(req, res) {
-  const q = (req.query.q || '').trim();
+  // Only plain strings: `?q[$ne]=x` parses to an object, and an unescaped
+  // regex built from user input is a ReDoS / pattern-injection risk.
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 24) : '';
   if (!q) return res.json([]);
+  const escaped = escapeRegex(q);
 
   const users = await User.find({
-    username: { $regex: q, $options: 'i' },
+    username: { $regex: escaped, $options: 'i' },
     _id: { $ne: req.session.userId },
     // $ne: false (rather than $eq: true) matches accounts from before this
     // field existed too, consistent with the schema's own default of true.
@@ -212,20 +248,28 @@ async function updateGroup(req, res) {
 }
 
 // Group picture upload — same admin-only restriction as updateGroup.
+// multer has already written the file by the time this runs, so every
+// early return discards it (otherwise rejected uploads pile up on disk).
 async function uploadGroupAvatar(req, res) {
   const { chatId } = req.params;
-  if (!mongoose.isValidObjectId(chatId)) return res.status(400).json({ error: 'Invalid chat id' });
+  const refuse = (status, error) => {
+    discardUploadedFile(req.file);
+    return res.status(status).json({ error });
+  };
+  if (!mongoose.isValidObjectId(chatId)) return refuse(400, 'Invalid chat id');
   if (!req.file) return res.status(400).json({ error: 'No image received' });
 
   const chat = await Chat.findOne({ _id: chatId, participants: req.session.userId });
-  if (!chat) return res.status(404).json({ error: 'Chat not found' });
-  if (!chat.isGroup) return res.status(400).json({ error: 'Only groups have a group picture' });
+  if (!chat) return refuse(404, 'Chat not found');
+  if (!chat.isGroup) return refuse(400, 'Only groups have a group picture');
   if (!chat.admin || chat.admin.toString() !== req.session.userId) {
-    return res.status(403).json({ error: 'Only the group creator can change the group picture' });
+    return refuse(403, 'Only the group creator can change the group picture');
   }
 
+  const previous = chat.avatar;
   chat.avatar = `/uploads/avatars/${req.file.filename}`;
   await chat.save();
+  deleteAvatarFile(previous, UPLOADS_ROOT);
   await chat.populate(CHAT_POPULATE);
   const chatObj = chat.toObject();
 
@@ -239,6 +283,7 @@ async function uploadGroupAvatar(req, res) {
 
 module.exports = {
   listChats,
+  markRead,
   createPrivateChat,
   createGroupChat,
   getMessages,

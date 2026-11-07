@@ -86,6 +86,10 @@ const userSchema = new mongoose.Schema(
       // Whether this account can be found via username search to start
       // a new chat. Doesn't affect chats the person is already in.
       discoverable: { type: Boolean, default: true },
+      // Whether others can see when you've read their messages (the double
+      // tick). Off = your reads are still tracked for your own unread
+      // badges, but never broadcast or exposed.
+      readReceipts: { type: Boolean, default: true },
     },
     // Images/files above this size won't auto-preview inline — see
     // client/src/controllers/ChatController.js's use of this alongside

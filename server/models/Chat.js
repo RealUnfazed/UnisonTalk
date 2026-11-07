@@ -54,6 +54,16 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Message',
     },
+    // Per-participant "has read everything up to `at`". Always stored (it
+    // drives that person's own unread badge); only EXPOSED to others when
+    // the reader allows read receipts — see utils/serialize.js's readBy.
+    reads: [
+      {
+        _id: false,
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+        at: { type: Date, required: true },
+      },
+    ],
   },
   { timestamps: true }
 );

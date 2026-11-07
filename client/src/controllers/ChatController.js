@@ -154,11 +154,171 @@ export class ChatController {
   // Opening a chat + message history
   // -------------------------------------------------------------------
 
+  // ------------------------------------------------------------------
+  // Unread counts & read receipts
+  // ------------------------------------------------------------------
+
+  markRead(chatId) {
+    this.state.setUnread(chatId, 0);
+    this.socket.emit('mark-read', { chatId });
+    this.updateTitleBadge();
+  }
+
+  updateTitleBadge() {
+    const total = this.state.totalUnread();
+    document.title = total > 0 ? `(${total > 99 ? '99+' : total}) ${this.baseTitle}` : this.baseTitle;
+  }
+
+  // ------------------------------------------------------------------
+  // Message actions: reply / edit / delete
+  // ------------------------------------------------------------------
+
+  wireMessageMenu() {
+    this.messageTexts ??= new Map();
+    this.menuMessage = null;
+    this.replyTarget = null;
+    this.editTarget = null;
+    this.baseTitle = document.title;
+    this.state.addEventListener?.('chats:changed', () => this.updateTitleBadge());
+
+    const menu = $('#msg-menu');
+    const choose = (action) => () => {
+      menu.classList.add('hidden');
+      if (this.menuMessage) action(this.menuMessage);
+    };
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target)) menu.classList.add('hidden');
+    });
+    $('#msg-menu-reply').addEventListener('click', choose((m) => this.startReply(m)));
+    $('#msg-menu-edit').addEventListener('click', choose((m) => this.startEdit(m)));
+    $('#msg-menu-delete').addEventListener('click', choose((m) => this.deleteMessage(m)));
+    $('#compose-context-cancel').addEventListener('click', () => this.cancelComposerContext());
+    $('#message-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.cancelComposerContext();
+    });
+
+    // Back in the tab with a chat open: whatever arrived meanwhile is now read.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.state.activeChatId) this.markRead(this.state.activeChatId);
+    });
+  }
+
+  openMessageMenu(event, msg) {
+    event.stopPropagation();
+    const chat = this.state.chats.get(msg.chatId);
+    if (!chat) return;
+
+    const me = this.state.currentUser.id;
+    const mine = msg.sender.id === me;
+    const isGroupAdmin = chat.isGroup && chat.admin === me;
+    const withinEditWindow = Date.now() - new Date(msg.createdAt).getTime() < 48 * 60 * 60 * 1000;
+
+    this.menuMessage = msg;
+    // Editing needs text to edit (attachment-only messages have none) and the 48h window.
+    $('#msg-menu-edit').classList.toggle('hidden', !(mine && withinEditWindow && this.messageTexts.has(msg.id)));
+    $('#msg-menu-delete').classList.toggle('hidden', !(mine || isGroupAdmin));
+
+    const menu = $('#msg-menu');
+    const rect = event.currentTarget.getBoundingClientRect();
+    menu.classList.remove('hidden');
+    menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+    menu.style.left = `${Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8))}px`;
+  }
+
+  startReply(msg) {
+    this.cancelComposerContext();
+    this.replyTarget = msg;
+    const text = this.messageTexts.get(msg.id) || (msg.attachment ? '📎 Attachment' : '');
+    this.chat.showComposerContext(`Replying to ${nameFor(msg.sender)}`, text);
+    $('#message-input').focus();
+  }
+
+  startEdit(msg) {
+    this.cancelComposerContext();
+    this.editTarget = msg;
+    const input = $('#message-input');
+    input.value = this.messageTexts.get(msg.id) || '';
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+    this.chat.showComposerContext('Editing message', input.value);
+    input.focus();
+  }
+
+  clearReply() {
+    this.replyTarget = null;
+    this.chat.hideComposerContext();
+  }
+
+  // Leaves reply/edit mode; abandoning an edit also clears the half-edited text.
+  cancelComposerContext() {
+    const wasEditing = Boolean(this.editTarget);
+    this.replyTarget = null;
+    this.editTarget = null;
+    this.chat.hideComposerContext();
+    if (wasEditing) {
+      const input = $('#message-input');
+      input.value = '';
+      input.style.height = 'auto';
+    }
+  }
+
+  async keyFor(chat) {
+    if (!chat.isSecret) return null;
+    await this.ensureIdentity();
+    return getSecretChatKey(chat, this.myIdentity.keyPair, this.state.currentUser.id);
+  }
+
+  async submitEdit(chat, content) {
+    const target = this.editTarget;
+    const body = {};
+    if (chat.isSecret) {
+      const encrypted = await encryptText(await this.keyFor(chat), content);
+      body.ciphertext = encrypted.ciphertext;
+      body.iv = encrypted.iv;
+    } else {
+      body.content = content;
+    }
+    // The server answers every member (including us) with a message-edited event.
+    await api.patch(`/api/messages/${target.id}`, body);
+    this.cancelComposerContext();
+  }
+
+  async deleteMessage(msg) {
+    if (!window.confirm('Delete this message for everyone?')) return;
+    try {
+      await api.delete(`/api/messages/${msg.id}`);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  // message-edited / message-deleted: refresh the preview and, if the chat
+  // is open, swap the bubble in place. (Quotes of this message elsewhere
+  // keep the text they had when rendered — they refresh on reload.)
+  async applyMessageUpdate(msg) {
+    const chat = this.state.chats.get(msg.chatId);
+    if (!chat) return;
+    this.previewCache?.delete(msg.id);
+    this.state.replaceLastMessageIfSame(msg);
+    if (msg.deleted && this.replyTarget && this.replyTarget.id === msg.id) this.cancelComposerContext();
+    if (msg.chatId !== this.state.activeChatId) return;
+
+    const row = document.querySelector(`[data-message-id="${msg.id}"]`);
+    if (!row) return;
+    try {
+      row.replaceWith(await this.buildBubbleFor(msg, chat, await this.keyFor(chat)));
+    } catch (err) {
+      console.error('Failed to update message:', err);
+    }
+  }
+
   async openChat(chatId) {
     this.state.setActiveChat(chatId);
     const chat = this.state.chats.get(chatId);
     if (!chat) return;
 
+    this.cancelComposerContext(); // a half-written reply/edit belongs to the previous chat
+    this.markRead(chatId);
     this.chat.showActiveChat();
     this.renderSidebar();
     this.chat.renderHeader(chat, this.state.currentUser.id);
@@ -196,6 +356,15 @@ export class ChatController {
   }
 
   async buildBubbleFor(msg, chat, key) {
+    this.messageTexts ??= new Map(); // message id -> its plain text (for reply quotes / edit prefill)
+    const me = this.state.currentUser.id;
+
+    // Deleted: nothing to decrypt or download, and no actions.
+    if (msg.deleted) {
+      this.messageTexts.delete(msg.id);
+      return this.chat.buildBubble(msg, { text: null, decryptFailed: false }, null, me, chat.isGroup, () => {});
+    }
+
     let decrypted;
     if (chat.isSecret) {
       decrypted = { text: null, decryptFailed: false };
@@ -209,6 +378,8 @@ export class ChatController {
     } else {
       decrypted = { text: msg.content || null, decryptFailed: false };
     }
+    if (decrypted.text) this.messageTexts.set(msg.id, decrypted.text);
+    else this.messageTexts.delete(msg.id);
 
     let attachmentInfo = null;
     if (msg.attachment) {
@@ -225,7 +396,46 @@ export class ChatController {
       ? () => this.downloadSecretAttachment(msg, key, attachmentInfo)
       : () => this.downloadCloudAttachment(attachmentInfo);
 
-    return this.chat.buildBubble(msg, decrypted, attachmentInfo, this.state.currentUser.id, chat.isGroup, onDownload);
+    const extras = {
+      reply: await this.replyPreview(msg, chat, key),
+      seen: this.seenState(msg, chat),
+      onMenu: (e) => this.openMessageMenu(e, msg),
+    };
+    return this.chat.buildBubble(msg, decrypted, attachmentInfo, me, chat.isGroup, onDownload, extras);
+  }
+
+  // The quote shown above a reply. Cloud: the server sent a text snippet.
+  // Secret: it sent the original's ciphertext, which only we can decrypt.
+  async replyPreview(msg, chat, key) {
+    const reply = msg.replyTo;
+    if (!reply) return null;
+    const name = nameFor(reply.sender);
+    if (reply.deleted) return { name, text: 'Deleted message' };
+
+    let text = null;
+    if (chat.isSecret) {
+      if (reply.ciphertext && key) {
+        try {
+          text = await decryptText(key, reply.ciphertext, reply.iv);
+        } catch {
+          text = null;
+        }
+      }
+    } else {
+      text = reply.content;
+    }
+    if (!text) text = reply.hasAttachment ? '📎 Attachment' : 'Message';
+    return { name, text: text.length > 120 ? `${text.slice(0, 120)}…` : text };
+  }
+
+  // Ticks only on my own messages in private chats: true once the other
+  // person has read past it (and allows receipts), false until then.
+  seenState(msg, chat) {
+    const me = this.state.currentUser.id;
+    if (msg.sender.id !== me || chat.isGroup) return null;
+    const other = chat.participants.find((p) => p.id !== me);
+    const readAt = other && chat.readBy ? chat.readBy[other.id] : null;
+    return Boolean(readAt) && new Date(readAt).getTime() >= new Date(msg.createdAt).getTime();
   }
 
   // -------------------------------------------------------------------
@@ -480,7 +690,14 @@ export class ChatController {
     sendBtn.disabled = true;
 
     try {
+      // Editing an existing message: text only, via the REST endpoint.
+      if (this.editTarget) {
+        if (content) await this.submitEdit(chat, content);
+        return;
+      }
+
       const payload = { chatId };
+      if (this.replyTarget) payload.replyTo = this.replyTarget.id;
 
       if (chat.isSecret) {
         await this.ensureIdentity();
@@ -506,6 +723,7 @@ export class ChatController {
 
       input.value = '';
       input.style.height = 'auto';
+      this.clearReply();
       this.pendingFile = null;
       $('#file-input').value = '';
       $('#attachment-preview').classList.add('hidden');
@@ -526,6 +744,13 @@ export class ChatController {
     this.socket.on('new-message', async (msg) => {
       const chat = this.state.chats.get(msg.chatId);
       if (chat) this.state.updateChatLastMessage(msg.chatId, msg);
+
+      // Unread bookkeeping: someone else's message in the chat I'm looking
+      // at (tab visible) is read at once; anywhere else it adds to the badge.
+      if (msg.sender.id !== this.state.currentUser.id) {
+        if (msg.chatId === this.state.activeChatId && document.visibilityState === 'visible') this.markRead(msg.chatId);
+        else this.state.bumpUnread(msg.chatId);
+      }
 
       if (msg.chatId === this.state.activeChatId) {
         try {
@@ -562,6 +787,15 @@ export class ChatController {
       if (chatId !== this.state.activeChatId) return;
       clearTimeout(this.typingHideTimers.get(userId));
       this.chat.hideTyping();
+    });
+
+    this.socket.on('message-edited', (msg) => this.applyMessageUpdate(msg));
+    this.socket.on('message-deleted', (msg) => this.applyMessageUpdate(msg));
+
+    this.socket.on('chat-read', ({ chatId, userId, at }) => {
+      this.state.markReadBy(chatId, userId, at);
+      const chat = this.state.chats.get(chatId);
+      if (chat && !chat.isGroup && chatId === this.state.activeChatId) this.chat.updateSeenTicks(at);
     });
 
     this.socket.on('chat-updated', (chat) => {

@@ -92,7 +92,8 @@ export class ChatView {
   //   { filename, size, mimeType, isImage: false }                    — a regular file: name + size + download button
   //   { filename, size, mimeType, isImage: true, previewUrl }         — an image, ready to show inline
   //   { filename, size, mimeType, isImage: true, previewUrl: null }   — an image whose preview failed to decrypt; falls back to the file-row layout
-  buildBubble(msg, decrypted, attachmentInfo, myUserId, isGroup, onDownload) {
+  // `extras` (all optional): { reply: {name, text}, seen: true|false|null, onMenu(event) }
+  buildBubble(msg, decrypted, attachmentInfo, myUserId, isGroup, onDownload, extras = {}) {
     const isMe = msg.sender.id === myUserId;
     const row = el('div', `flex ${isMe ? 'justify-end' : 'justify-start'} items-end gap-2`);
     row.dataset.messageId = msg.id;
@@ -105,11 +106,46 @@ export class ChatView {
 
     const bubble = el(
       'div',
-      `max-w-[60%] px-3.5 py-2.5 ${isMe ? 'bubble-own bg-signal/90 text-ink' : 'bubble-other bg-white border border-black/5 text-ink'}`
+      `group relative max-w-[60%] px-3.5 py-2.5 ${isMe ? 'bubble-own bg-signal/90 text-ink' : 'bubble-other bg-white border border-black/5 text-ink'}`
     );
+
+    // Deleted: a quiet placeholder — the server has already removed everything else.
+    if (msg.deleted) {
+      bubble.className = bubble.className.replace('bg-signal/90', 'bg-signal/40').replace('bg-white', 'bg-white/70');
+      bubble.appendChild(
+        el('p', 'text-sm italic text-slate flex items-center gap-1.5', [
+          Object.assign(document.createElement('i'), { className: 'fa-solid fa-ban text-xs' }),
+          document.createTextNode(' This message was deleted'),
+        ])
+      );
+      bubble.appendChild(el('p', `text-[10px] mt-1 ${isMe ? 'text-ink/50' : 'text-slate'}`, formatClock(msg.createdAt)));
+      row.appendChild(bubble);
+      return row;
+    }
+
+    if (extras.onMenu) {
+      const menuBtn = el(
+        'button',
+        'absolute top-1 right-1 w-6 h-6 rounded-full bg-black/5 hover:bg-black/10 text-ink/60 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center text-[10px]'
+      );
+      menuBtn.type = 'button';
+      menuBtn.title = 'Message actions';
+      menuBtn.appendChild(Object.assign(document.createElement('i'), { className: 'fa-solid fa-chevron-down' }));
+      menuBtn.addEventListener('click', (e) => extras.onMenu(e));
+      bubble.appendChild(menuBtn);
+    }
 
     if (!isMe && isGroup) {
       bubble.appendChild(el('p', 'text-[11px] font-semibold text-harmony mb-0.5', nameFor(msg.sender)));
+    }
+
+    if (extras.reply) {
+      bubble.appendChild(
+        el('div', 'border-l-2 border-harmony/70 bg-black/5 rounded-r px-2 py-1 mb-1.5 text-xs', [
+          el('p', 'font-semibold text-harmony truncate', extras.reply.name),
+          el('p', 'text-slate truncate', extras.reply.text),
+        ])
+      );
     }
 
     if (decrypted.text) {
@@ -127,7 +163,21 @@ export class ChatView {
       bubble.appendChild(this.buildAttachmentCard(attachmentInfo, onDownload));
     }
 
-    bubble.appendChild(el('p', `text-[10px] mt-1 ${isMe ? 'text-ink/50' : 'text-slate'}`, formatClock(msg.createdAt)));
+    const footer = el('div', `flex items-center justify-end gap-1.5 mt-1 text-[10px] ${isMe ? 'text-ink/50' : 'text-slate'}`);
+    if (msg.editedAt) footer.appendChild(el('span', 'italic', 'edited'));
+    footer.appendChild(el('span', '', formatClock(msg.createdAt)));
+    if (extras.seen === true || extras.seen === false) {
+      // One tick = delivered, two = the other person has read it.
+      const ticks = el('span', extras.seen ? 'text-harmony' : '');
+      ticks.dataset.ticks = '1';
+      ticks.dataset.created = new Date(msg.createdAt).toISOString();
+      ticks.appendChild(
+        Object.assign(document.createElement('i'), { className: `fa-solid ${extras.seen ? 'fa-check-double' : 'fa-check'}` })
+      );
+      footer.appendChild(ticks);
+    }
+    bubble.appendChild(footer);
+
     row.appendChild(bubble);
     return row;
   }
@@ -211,6 +261,28 @@ export class ChatView {
       if (icon) icon.className = prevIconClass;
       triggerEl.disabled = false;
     }
+  }
+
+  // A chat partner has read up to `readAt`: every one of my single ticks
+  // at or before that moment becomes a double tick.
+  updateSeenTicks(readAt) {
+    const at = new Date(readAt).getTime();
+    document.querySelectorAll('[data-ticks]').forEach((tick) => {
+      if (new Date(tick.dataset.created).getTime() > at) return;
+      tick.className = 'text-harmony';
+      tick.replaceChildren(Object.assign(document.createElement('i'), { className: 'fa-solid fa-check-double' }));
+    });
+  }
+
+  // The bar above the input for "Replying to …" / "Editing message".
+  showComposerContext(title, text) {
+    $('#compose-context-title').textContent = title;
+    $('#compose-context-text').textContent = text || '';
+    $('#compose-context').classList.remove('hidden');
+  }
+
+  hideComposerContext() {
+    $('#compose-context').classList.add('hidden');
   }
 
   appendMessage(node) {

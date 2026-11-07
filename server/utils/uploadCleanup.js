@@ -37,4 +37,11 @@ function deleteAvatarFile(url, uploadsRoot) {
   fs.promises.unlink(path.join(uploadsRoot, url.replace('/uploads/', ''))).catch(() => {});
 }
 
-module.exports = { sweepOrphanUploads, discardUploadedFile, deleteAvatarFile };
+// Remove a deleted message's attachment. One path segment under /uploads/ only.
+const ATTACHMENT_URL_RE = /^\/uploads\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function deleteAttachmentFile(url, uploadsRoot) {
+  if (typeof url !== 'string' || !ATTACHMENT_URL_RE.test(url) || url.includes('..')) return;
+  fs.promises.unlink(path.join(uploadsRoot, url.replace('/uploads/', ''))).catch(() => {});
+}
+
+module.exports = { sweepOrphanUploads, discardUploadedFile, deleteAvatarFile, deleteAttachmentFile };

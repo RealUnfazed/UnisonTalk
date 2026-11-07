@@ -8,7 +8,7 @@
 module.exports = [
   {
     path: 'participants',
-    select: 'username displayName avatar isOnline lastSeen publicKey privacy.showLastSeen',
+    select: 'username displayName avatar isOnline lastSeen publicKey privacy.showLastSeen privacy.readReceipts',
   },
   { path: 'lastMessage', populate: { path: 'sender', select: 'username displayName avatar' } },
 ];

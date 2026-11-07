@@ -36,7 +36,7 @@ describe('serializeUser — privacy', () => {
   it('only sends settings back to their owner', () => {
     const u = user({ privacy: { showLastSeen: false, discoverable: false }, autoDownloadLimitMb: 12 });
     const mine = serializeUser(u, 'u1');
-    assert.deepEqual(mine.privacy, { showLastSeen: false, discoverable: false });
+    assert.deepEqual(mine.privacy, { showLastSeen: false, discoverable: false, readReceipts: true });
     assert.equal(mine.autoDownloadLimitMb, 12);
     const theirs = serializeUser(u, 'u2');
     assert.ok(!('privacy' in theirs));

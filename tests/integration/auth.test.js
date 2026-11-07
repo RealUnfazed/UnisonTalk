@@ -22,9 +22,9 @@ describe('accounts & registration', () => {
   });
 
   it('still enforces uniqueness for real Phasetime IDs', async () => {
-    await makeUser('a', { phasetimeId: 'pt_1' });
-    await assert.rejects(makeUser('b', { phasetimeId: 'pt_1' }), /E11000/);
-    await makeUser('c', { phasetimeId: 'pt_2' }); // different ID is fine
+    await makeUser('aaa', { phasetimeId: 'pt_1' });
+    await assert.rejects(makeUser('bbb', { phasetimeId: 'pt_1' }), /E11000/);
+    await makeUser('ccc', { phasetimeId: 'pt_2' }); // different ID is fine
   });
 
   it('upgrades a database that still has the legacy sparse index (issue #14 migration)', async () => {

@@ -33,6 +33,7 @@ export class ProfileController {
     $('#settings-display-name').value = u.displayName || '';
     $('#settings-show-last-seen').checked = u.privacy?.showLastSeen !== false;
     $('#settings-discoverable').checked = u.privacy?.discoverable !== false;
+    $('#settings-read-receipts').checked = u.privacy?.readReceipts !== false;
     $('#settings-autodownload').value = u.autoDownloadLimitMb ?? 5;
     this.renderAutoLabel();
     this.showError('#settings-error', null);
@@ -90,6 +91,7 @@ export class ProfileController {
         displayName: $('#settings-display-name').value,
         privacyShowLastSeen: $('#settings-show-last-seen').checked,
         privacyDiscoverable: $('#settings-discoverable').checked,
+        privacyReadReceipts: $('#settings-read-receipts').checked,
         autoDownloadLimitMb: Number($('#settings-autodownload').value),
       });
       this.applyMyUser(user);

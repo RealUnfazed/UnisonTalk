@@ -15,28 +15,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
 
 <script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          ink: '#1B2036',
-          'ink-light': '#262C46',
-          mist: '#EEF1F0',
-          signal: '#D9A62E',
-          'signal-dark': '#B5871F',
-          harmony: '#3E8E7E',
-          ember: '#C1523B',
-          slate: { DEFAULT: '#5B6472' },
-        },
-        fontFamily: {
-          display: ['"Space Grotesk"', 'sans-serif'],
-          sans: ['Manrope', 'sans-serif'],
-        },
-      },
-    },
-  };
-</script>
+<script src="/tailwind-config.js"></script>
 <style>
   body { font-family: 'Manrope', sans-serif; }
   .font-display { font-family: 'Space Grotesk', sans-serif; }
@@ -141,6 +120,13 @@
           </span>
         </div>
 
+        <div id="compose-context" class="hidden mx-6 mb-2 px-3 py-2 bg-white border border-black/10 border-l-4 border-l-harmony rounded-lg flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p id="compose-context-title" class="text-xs font-semibold text-harmony"></p>
+            <p id="compose-context-text" class="text-xs text-slate truncate"></p>
+          </div>
+          <button id="compose-context-cancel" type="button" class="text-slate hover:text-ember px-2" title="Cancel (Esc)"><i class="fa-solid fa-xmark"></i></button>
+        </div>
         <div id="attachment-preview" class="hidden mx-6 mb-2 px-3 py-2 bg-white border border-black/10 rounded-lg text-sm flex items-center justify-between">
           <span class="flex items-center gap-2 text-ink truncate">
             <i class="fa-solid fa-paperclip text-slate"></i>
@@ -208,6 +194,13 @@
     </div>
   </div>
 
+  <!-- ============ Message actions menu ============ -->
+  <div id="msg-menu" class="hidden fixed z-40 w-44 bg-white rounded-xl shadow-xl border border-black/10 py-1 text-sm">
+    <button id="msg-menu-reply" type="button" class="w-full text-left px-3.5 py-2 hover:bg-mist flex items-center gap-2.5"><i class="fa-solid fa-reply w-4 text-slate"></i> Reply</button>
+    <button id="msg-menu-edit" type="button" class="w-full text-left px-3.5 py-2 hover:bg-mist flex items-center gap-2.5"><i class="fa-solid fa-pen w-4 text-slate"></i> Edit</button>
+    <button id="msg-menu-delete" type="button" class="w-full text-left px-3.5 py-2 hover:bg-mist flex items-center gap-2.5 text-ember"><i class="fa-solid fa-trash w-4"></i> Delete</button>
+  </div>
+
   <!-- ============ Settings modal ============ -->
   <div id="settings-modal" class="hidden fixed inset-0 bg-ink/40 z-30 flex items-center justify-center px-4">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
@@ -241,6 +234,11 @@
       <label class="flex items-start gap-3 mb-5 cursor-pointer">
         <input id="settings-discoverable" type="checkbox" class="mt-1 accent-[#D9A62E]" />
         <span class="text-sm text-ink">Let people find me by username<br><span class="text-xs text-slate">When off, you won't appear in search. Existing chats are unaffected.</span></span>
+      </label>
+
+      <label class="flex items-start gap-3 mb-5 cursor-pointer">
+        <input id="settings-read-receipts" type="checkbox" class="mt-1 accent-[#D9A62E]" />
+        <span class="text-sm text-ink">Send read receipts<br><span class="text-xs text-slate">When off, others never see the double tick for your reads. Your own unread counts still work.</span></span>
       </label>
 
       <p class="text-xs font-semibold text-slate mb-2">Media</p>

@@ -25,6 +25,12 @@ You should expect an initial response within a few days. Once a fix is
 available, it'll be released and you'll be credited in the release notes
 unless you'd prefer otherwise.
 
+## Hardening in place
+
+Authentication and sessions: per-account and per-IP login throttling, registration throttling, session regeneration on every sign-in, secure cookies in production, uniform responses for unknown users vs. wrong passwords. Transport/headers: nosniff, framing and referrer policies, HSTS, and a CSP (report-only by default). Uploads: membership-checked, sandboxed, never served with a client-chosen type or extension; socket attachment metadata is validated and rebuilt. Robustness: wrapped async handlers, a generic 500 that never leaks internals, strict input typing (including socket payloads that aren't objects), escaped search. See "Security hardening" in the README for details and configuration.
+
+**Known limits** (tracked for later phases): rate-limit counters are in-memory and per process (use a shared store when running multiple instances); the CSP can't drop `style-src 'unsafe-inline'` or the CDN script host until Tailwind moves from the Play CDN to a build step; Cloud Chat attachment *files* aren't encrypted at rest; there is no account lockout, email verification or password reset yet; no `package-lock.json` is committed, so installs aren't fully reproducible.
+
 ## Scope notes
 
 A few things worth knowing if you're evaluating this project for production use, since it started as a learning/reference implementation:

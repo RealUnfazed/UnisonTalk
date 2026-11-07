@@ -32,6 +32,14 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
 
+    // --- Lifecycle ---
+    // The message this one replies to (rendered as a quote above it).
+    replyTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
+    editedAt: { type: Date, default: null },
+    // Soft delete: the row stays so quotes/ordering still make sense, but
+    // its content, ciphertext and attachment are removed (messageController).
+    deletedAt: { type: Date, default: null },
+
     // --- Cloud chat fields (encrypted at rest, decrypted server-side) ---
     content: {
       type: String,
@@ -75,5 +83,7 @@ const messageSchema = new mongoose.Schema(
 // Message history for a chat is always fetched newest-first with a cursor,
 // so this compound index keeps that query fast even as history grows.
 messageSchema.index({ chat: 1, createdAt: -1 });
+// Attachment access checks and the orphan-upload sweep look messages up by file URL.
+messageSchema.index({ 'attachment.url': 1 }, { partialFilterExpression: { 'attachment.url': { $type: 'string' } } });
 
 module.exports = mongoose.model('Message', messageSchema);

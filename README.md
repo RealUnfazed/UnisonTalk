@@ -35,6 +35,8 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [How the real-time architecture works](#how-the-real-time-architecture-works)
 - [Phasetime SSO (optional)](#phasetime-sso-optional)
 - [Notes & possible extensions](#notes--possible-extensions)
+- [Messages, read state & unread counts](#messages-read-state--unread-counts)
+- [Security hardening](#security-hardening)
 - [Testing](#testing)
 - [Contributing](#contributing)
 - [License](#license)
@@ -235,6 +237,25 @@ Deliberately simpler than Telegram: no "My Contacts" tier (there's no contacts l
 - There's no read-receipt/unread-count system yet.
 - There's no way to add a member to an existing group or change a group's membership after creation.
 - See [Security model](#security-model) above and [SECURITY.md](./SECURITY.md) for what to review before deploying this publicly.
+
+## Messages, read state & unread counts
+
+- **Reply, edit, delete:** hover a message and use the chevron menu. Replies show a quote of the original (for Secret Chats the quote is decrypted in your browser). You can edit your own text messages for 48 hours — an "edited" label stays on them. Delete removes a message for everyone: the text/ciphertext and any attachment file are erased server-side and a placeholder remains. In groups, the creator can also delete other people's messages. Quotes of an edited or deleted message elsewhere refresh on reload.
+- **Unread badges:** each chat shows how many messages from others are newer than your read marker (capped at 99+), and the tab title shows the total. Opening a chat, or returning to its tab, marks it read.
+- **Read receipts:** in private chats your messages show one tick when sent and two once the other person has read them. Settings → *Send read receipts* turns your side off: others stop seeing when you read (and you still get correct unread counts). It isn't reciprocal. Groups don't show per-message receipts.
+- **Upgrading note:** chats you had before this feature have no read marker yet, so their existing history counts as unread once, until you open them.
+
+## Security hardening
+
+Everything below ships in the repo and is covered by tests; see [SECURITY.md](./SECURITY.md) for the threat model and known limits.
+
+- **Rate limiting** (in-memory, per process): login is limited per account+IP and per IP, registration per IP, uploads/search per user, plus a global API cap. Responses are `429` with `Retry-After`.
+- **Sessions:** a fresh session ID is issued on every login/registration/SSO sign-in (no session fixation); `Secure` cookies in production; passwords are compared in constant-ish time whether or not the account exists, so response time doesn't reveal usernames.
+- **Headers:** `nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, COOP, HSTS (production + HTTPS), and a Content-Security-Policy that **starts in report-only mode** — load the app, check the browser console, then set `CSP_MODE=enforce`.
+- **Uploads:** chat attachments are no longer public static files — they're served only to logged-in members of a chat that contains them, as inline images for safe raster types and sandboxed downloads for everything else (so an uploaded `.html`/`.svg` can never run as a page on your origin). Avatar file extensions come from the validated image type, never the filename. Attachment metadata received over the socket is rebuilt from validated fields (no arbitrary URLs → no tracking-pixel/IP-leak links). Rejected, replaced and abandoned uploads are cleaned up.
+- **Input handling:** every controller is wrapped so an unexpected error becomes a logged 500 rather than a crashed process; request bodies and socket payloads are type-checked; search input is escaped (no regex injection/ReDoS); socket `typing` events are only relayed into rooms you've actually joined.
+- **Configuration:** the server refuses to start in production with a weak `SESSION_SECRET`; CORS allows nothing cross-origin in production unless `ALLOWED_ORIGIN` is set. See `.env.example` for `NODE_ENV`, `TRUST_PROXY`, `COOKIE_SECURE` and `CSP_MODE`.
+- **Supply chain:** Dependabot (npm + GitHub Actions) and a non-blocking `npm audit` job in CI.
 
 ## Testing
 

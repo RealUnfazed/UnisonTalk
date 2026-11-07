@@ -54,8 +54,18 @@ export class SidebarView {
       nameRow.appendChild(el('span', 'text-[11px] text-white/40 shrink-0', formatRelative(chat.lastMessage.createdAt)));
     }
 
-    const preview = el('p', 'text-xs text-white/50 truncate', this.previewFor(chat, myUserId, previewText));
-    const textWrap = el('div', 'flex-1 min-w-0', [nameRow, preview]);
+    const preview = el('p', 'text-xs text-white/50 truncate flex-1', this.previewFor(chat, myUserId, previewText));
+    const previewRow = el('div', 'flex items-center gap-2', [preview]);
+    if (chat.unreadCount > 0) {
+      previewRow.appendChild(
+        el(
+          'span',
+          'shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-ember text-white text-[10px] font-semibold flex items-center justify-center',
+          chat.unreadCount > 99 ? '99+' : String(chat.unreadCount)
+        )
+      );
+    }
+    const textWrap = el('div', 'flex-1 min-w-0', [nameRow, previewRow]);
 
     const item = el('button', null, [avatarWrap, textWrap]);
     item.type = 'button';
@@ -68,6 +78,7 @@ export class SidebarView {
   }
 
   previewFor(chat, myUserId, previewText) {
+    if (chat.lastMessage && chat.lastMessage.deleted) return '🚫 Message deleted';
     if (!chat.lastMessage) return chat.isGroup ? 'No messages yet — say hello' : 'Say hello 👋';
     const who =
       chat.lastMessage.sender.id === myUserId ? 'You: ' : chat.isGroup ? `${nameFor(chat.lastMessage.sender)}: ` : '';

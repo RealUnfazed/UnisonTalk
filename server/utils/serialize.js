@@ -37,6 +37,7 @@ function serializeUser(user, viewerId) {
           privacy: {
             showLastSeen: user.privacy?.showLastSeen !== false,
             discoverable: user.privacy?.discoverable !== false,
+            readReceipts: user.privacy?.readReceipts !== false,
           },
           autoDownloadLimitMb: user.autoDownloadLimitMb ?? 5,
         }
@@ -48,7 +49,20 @@ function serializeUser(user, viewerId) {
 // exactly what the client needs, including a computed display name for
 // private chats (there's no group "name" field to fall back on) and, for
 // groups, their own editable name/description/avatar.
-function serializeChat(chat, currentUserId) {
+// When each OTHER participant last read this chat — omitting anyone who
+// has read receipts turned off. (Your own marker never appears here.)
+function readByOthers(chat, currentUserId) {
+  const readBy = {};
+  for (const r of chat.reads || []) {
+    const uid = r.user.toString();
+    if (uid === currentUserId) continue;
+    const participant = chat.participants.find((p) => p._id.toString() === uid);
+    if (participant && participant.privacy?.readReceipts !== false) readBy[uid] = r.at;
+  }
+  return readBy;
+}
+
+function serializeChat(chat, currentUserId, unreadCount = 0) {
   const participants = chat.participants.map((p) => serializeUser(p, currentUserId));
   let displayName = chat.name;
 
@@ -68,6 +82,8 @@ function serializeChat(chat, currentUserId) {
     description: chat.isGroup ? chat.description || '' : null,
     avatar: chat.isGroup ? chat.avatar || null : null,
     participants,
+    unreadCount,
+    readBy: readByOthers(chat, currentUserId),
     admin: chat.admin ? chat.admin.toString() : null,
     lastMessage: chat.lastMessage ? serializeMessage(chat.lastMessage) : null,
     updatedAt: chat.updatedAt,
@@ -91,7 +107,45 @@ function decryptCloudText(ciphertext, iv) {
   }
 }
 
+// A quote of the message being replied to. Only a populated target (with
+// its sender) can be previewed — a bare ObjectId means "not loaded".
+function replyPreview(reply) {
+  if (!reply || typeof reply !== 'object' || !reply.sender || typeof reply.sender !== 'object' || !reply.sender.username) {
+    return null;
+  }
+  const sender = serializeUser(reply.sender);
+  if (reply.deletedAt) return { id: reply._id.toString(), sender, deleted: true };
+
+  const text = decryptCloudText(reply.content, reply.contentIv);
+  return {
+    id: reply._id.toString(),
+    sender,
+    deleted: false,
+    content: text && text.length > 140 ? `${text.slice(0, 140)}…` : text,
+    // Secret Chats: ciphertext the recipient's browser decrypts (we can't).
+    ciphertext: reply.ciphertext || null,
+    iv: reply.iv || null,
+    hasAttachment: Boolean(reply.attachment && reply.attachment.url),
+  };
+}
+
 function serializeMessage(message) {
+  const base = {
+    id: message._id.toString(),
+    chatId: message.chat._id ? message.chat._id.toString() : message.chat.toString(),
+    // No viewer context passed here deliberately — nothing in the client
+    // renders a message sender's presence, only their name/avatar, so the
+    // privacy branch in serializeUser is moot for this call site.
+    sender: message.sender._id ? serializeUser(message.sender) : { id: message.sender.toString() },
+    createdAt: message.createdAt,
+  };
+
+  // Deleted: nothing about the original survives into the response, even
+  // if some field were left behind in the database.
+  if (message.deletedAt) {
+    return { ...base, deleted: true, deletedAt: message.deletedAt, content: null, ciphertext: null, iv: null, attachment: null, replyTo: null, editedAt: null };
+  }
+
   const hasAttachment = message.attachment && message.attachment.url;
   let attachment = null;
   if (hasAttachment) {
@@ -101,12 +155,8 @@ function serializeMessage(message) {
   }
 
   return {
-    id: message._id.toString(),
-    chatId: message.chat._id ? message.chat._id.toString() : message.chat.toString(),
-    // No viewer context passed here deliberately — nothing in the client
-    // renders a message sender's presence, only their name/avatar, so the
-    // privacy branch in serializeUser is moot for this call site.
-    sender: message.sender._id ? serializeUser(message.sender) : { id: message.sender.toString() },
+    ...base,
+    deleted: false,
     // Cloud chats populate `content` (encrypted at rest, decrypted here);
     // Secret chats populate `ciphertext`/`iv` instead, which the server
     // never decrypts — only the recipient's browser can. A given message
@@ -115,7 +165,8 @@ function serializeMessage(message) {
     ciphertext: message.ciphertext || null,
     iv: message.iv || null,
     attachment,
-    createdAt: message.createdAt,
+    replyTo: replyPreview(message.replyTo),
+    editedAt: message.editedAt || null,
   };
 }
 

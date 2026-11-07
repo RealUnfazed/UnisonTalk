@@ -61,8 +61,48 @@ export class AppState extends EventTarget {
     this.emit('presence:changed', { userId, isOnline, lastSeen });
   }
 
+  // Unread badge + read-receipt bookkeeping -----------------------------
+  setUnread(chatId, n) {
+    const chat = this.chats.get(chatId);
+    if (!chat || (chat.unreadCount || 0) === n) return;
+    chat.unreadCount = n;
+    this.emit('chats:changed');
+  }
+
+  bumpUnread(chatId) {
+    const chat = this.chats.get(chatId);
+    if (!chat) return;
+    chat.unreadCount = (chat.unreadCount || 0) + 1;
+    this.emit('chats:changed');
+  }
+
+  totalUnread() {
+    let total = 0;
+    this.chats.forEach((chat) => { total += chat.unreadCount || 0; });
+    return total;
+  }
+
+  // Someone ELSE has read this chat up to `at` (your own reads aren't shown to you).
+  markReadBy(chatId, userId, at) {
+    const chat = this.chats.get(chatId);
+    if (!chat || (this.currentUser && userId === this.currentUser.id)) return;
+    chat.readBy = { ...(chat.readBy || {}), [userId]: at };
+  }
+
+  // An edit or delete of the message currently shown as the chat's preview.
+  replaceLastMessageIfSame(msg) {
+    const chat = this.chats.get(msg.chatId);
+    if (chat && chat.lastMessage && chat.lastMessage.id === msg.id) {
+      chat.lastMessage = msg;
+      this.emit('chats:changed');
+    }
+  }
+
   updateChat(chat) {
-    this.chats.set(chat.id, chat);
+    // A server-sent chat (e.g. after a group edit) doesn't know what this
+    // browser has already shown as read — keep the local unread count.
+    const previous = this.chats.get(chat.id);
+    this.chats.set(chat.id, previous ? { ...chat, unreadCount: previous.unreadCount || 0 } : chat);
     this.emit('chats:changed');
   }
 
