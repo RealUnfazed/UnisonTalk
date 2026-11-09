@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
@@ -12,7 +13,7 @@ const { blockStatus } = require('../utils/blocks');
 const { markChatRead } = require('../utils/readState');
 const { discardUploadedFile, deleteAvatarFile } = require('../utils/uploadCleanup');
 
-const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
+const { UPLOADS_DIR: UPLOADS_ROOT } = require('../config/paths');
 
 async function listChats(req, res) {
   const chats = await Chat.find({ participants: req.session.userId, ...visibleToMe(req.session.userId) })
@@ -104,7 +105,7 @@ async function createPrivateChat(req, res) {
     const serialized = serializeChat(chat.toObject(), req.session.userId);
     res.status(created ? 201 : 200).json(serialized);
   } catch (err) {
-    console.error('[chat] private chat failed:', err.message);
+    logger.error('[chat] private chat failed:', err.message);
     res.status(500).json({ error: 'Could not start chat' });
   }
 }
@@ -175,7 +176,7 @@ async function createGroupChat(req, res) {
 
     res.status(201).json({ ...serialized, skipped });
   } catch (err) {
-    console.error('[chat] group chat failed:', err.message);
+    logger.error('[chat] group chat failed:', err.message);
     res.status(500).json({ error: 'Could not create group' });
   }
 }

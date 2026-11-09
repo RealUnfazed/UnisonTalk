@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 
 async function connectDB() {
   const uri = process.env.MONGODB_URI;
@@ -8,11 +9,11 @@ async function connectDB() {
   }
 
   mongoose.connection.on('connected', () => {
-    console.log('[mongo] connected to', mongoose.connection.name);
+    logger.info('[mongo] connected to', mongoose.connection.name);
   });
 
   mongoose.connection.on('error', (err) => {
-    console.error('[mongo] connection error:', err.message);
+    logger.error('[mongo] connection error:', err.message);
   });
 
   await mongoose.connect(uri);
@@ -39,13 +40,13 @@ async function migratePhasetimeIndex() {
 
   if (indexes.some((i) => i.name === 'phasetimeId_1')) {
     await User.collection.dropIndex('phasetimeId_1');
-    console.log('[mongo] dropped legacy phasetimeId_1 index');
+    logger.info('[mongo] dropped legacy phasetimeId_1 index');
   }
 
   try {
     await User.createIndexes();
   } catch (err) {
-    console.error('[mongo] could not build user indexes:', err.message);
+    logger.error('[mongo] could not build user indexes:', err.message);
   }
 }
 

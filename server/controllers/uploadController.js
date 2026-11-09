@@ -5,7 +5,7 @@ const Chat = require('../models/Chat');
 const { isInlineImageType } = require('../utils/validateAttachment');
 const { discardUploadedFile } = require('../utils/uploadCleanup');
 
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const { UPLOADS_DIR: UPLOAD_DIR } = require('../config/paths');
 const FILENAME_RE = /^[A-Za-z0-9._-]{1,120}$/;
 
 // Two upload shapes land here, distinguished by whether the encrypted

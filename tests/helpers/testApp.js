@@ -18,11 +18,13 @@ const Message = require('../../server/models/Message');
 
 const PASSWORD = 'secret123';
 
-async function startTestApp({ sockets = false } = {}) {
+async function startTestApp({ sockets = false, presenceGraceMs = 50 } = {}) {
   const mongod = await MongoMemoryServer.create();
   process.env.MONGODB_URI = mongod.getUri('unisontalk_test');
   process.env.SESSION_SECRET = 'test-session-secret';
   process.env.RATE_LIMIT_DISABLED = 'true'; // individual tests opt back in
+  process.env.LOG_LEVEL = 'silent'; // the suite deliberately provokes errors; keep output readable
+  process.env.PRESENCE_GRACE_MS = String(presenceGraceMs); // production default is 3000
   process.env.CLOUD_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
   for (const k of ['PHASETIME_SSO_BASE_URL', 'PHASETIME_CLIENT_ID', 'PHASETIME_CLIENT_SECRET', 'PHASETIME_REDIRECT_URI']) {
     delete process.env[k];

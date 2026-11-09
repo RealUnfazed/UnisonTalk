@@ -12,15 +12,16 @@ const TOO_MANY_LOGINS = 'Too many login attempts. Please wait a few minutes and 
 // password; a looser per-IP limit stops one machine spraying many accounts.
 // Successful logins don't count against either.
 const loginPerAccount = rateLimit({
+  name: 'login-account',
   windowMs: 15 * 60_000,
   max: 8,
   key: (req) => `${req.ip}:${String(req.body?.username ?? '').toLowerCase().slice(0, 64)}`,
   message: TOO_MANY_LOGINS,
   skipSuccessful: true,
 });
-const loginPerIp = rateLimit({ windowMs: 15 * 60_000, max: 40, message: TOO_MANY_LOGINS, skipSuccessful: true });
-const registerLimiter = rateLimit({ windowMs: 60 * 60_000, max: 10, message: 'Too many accounts created from this network. Please try again later.' });
-const ssoLimiter = rateLimit({ windowMs: 10 * 60_000, max: 30 });
+const loginPerIp = rateLimit({ name: 'login-ip', windowMs: 15 * 60_000, max: 40, message: TOO_MANY_LOGINS, skipSuccessful: true });
+const registerLimiter = rateLimit({ name: 'register', windowMs: 60 * 60_000, max: 10, message: 'Too many accounts created from this network. Please try again later.' });
+const ssoLimiter = rateLimit({ name: 'sso', windowMs: 10 * 60_000, max: 30 });
 
 router.post('/register', registerLimiter, authController.register);
 router.post('/login', loginPerIp, loginPerAccount, authController.login);

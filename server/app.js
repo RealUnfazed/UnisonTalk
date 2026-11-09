@@ -11,9 +11,13 @@ const { securityHeaders } = require('./middleware/securityHeaders');
 const rateLimit = require('./middleware/rateLimit');
 const { requireAuth } = require('./middleware/auth');
 const { wrap } = require('./utils/asyncRoutes');
+const mongoose = require('mongoose');
+const logger = require('./utils/logger');
+const { requestLogger } = require('./middleware/requestLogger');
+const { createHealthRouter } = require('./routes/healthRoutes');
 const { serveAttachment } = wrap(require('./controllers/uploadController'));
 
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const { UPLOADS_DIR } = require('./config/paths');
 
 // "1" / "2" = number of proxy hops, "true" = trust all, or a subnet name
 // like "loopback". Needed behind nginx/Render/Fly/etc. so req.ip, secure
@@ -32,6 +36,23 @@ function createApp() {
 
   app.disable('x-powered-by');
   app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+  // Health endpoints come first: no sessions, no CORS, no rate limits — a
+  // load balancer probing them must never be blocked or create session rows.
+  // server.js adds a Redis check when Redis is configured, and flips
+  // `shuttingDown` so /readyz goes 503 and the balancer drains this instance.
+  app.locals.shuttingDown = false;
+  app.locals.readinessChecks = [
+    {
+      name: 'mongo',
+      check: async () => {
+        if (mongoose.connection.readyState !== 1) throw new Error('not connected');
+        await mongoose.connection.db.admin().ping();
+      },
+    },
+  ];
+  app.use(createHealthRouter());
+  app.use(requestLogger);
+
   app.use(securityHeaders);
 
   // CORS: with ALLOWED_ORIGIN set, only those origins may call the API with
@@ -64,7 +85,7 @@ function createApp() {
   app.use(sessionMiddleware);
 
   // --- API ----------------------------------------------------------------
-  app.use('/api', rateLimit({ windowMs: 60_000, max: 600 }));
+  app.use('/api', rateLimit({ name: 'api', windowMs: 60_000, max: 600 }));
   app.use('/api/auth', authRoutes);
   app.use('/api', chatRoutes);
 
@@ -107,12 +128,14 @@ function createApp() {
     }
 
     if (!(status >= 400 && status < 500)) {
-      console.error(`[server] error handling ${req.method} ${req.originalUrl}:`, err);
+      // Path only: query strings can carry tokens (e.g. the SSO callback's code).
+      (req.log || logger).error(`[server] error handling ${req.method} ${req.originalUrl.split('?')[0]}:`, err);
       status = 500;
       message = 'Something went wrong. Please try again.';
     }
     if (res.headersSent) return;
-    res.status(status).json({ error: message });
+    // A 500 carries the request id so a user's report can be matched to the log line.
+    res.status(status).json(status === 500 && req.id ? { error: message, requestId: req.id } : { error: message });
   });
 
   return { app, sessionMiddleware, sessionStore };

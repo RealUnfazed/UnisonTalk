@@ -12,19 +12,23 @@ const { sanitizeAttachment } = require('../utils/validateAttachment');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
 const { setReadMarker, markChatRead } = require('../utils/readState');
 const { blockedBetween, presentableRooms } = require('../utils/blocks');
+const logger = require('../utils/logger');
+const { createPresenceTracker } = require('./presence');
+const { UPLOADS_DIR } = require('../config/paths');
 
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const UPLOAD_DIR = UPLOADS_DIR;
 const isId = (v) => typeof v === 'string' && mongoose.isValidObjectId(v);
 // Socket payloads are whatever the client sends — including null, numbers or
 // arrays. Destructuring null in a handler's parameter list throws inside
 // Socket.IO, which is an uncaught exception that takes the server down.
 const asObject = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 
-// Tracks how many open sockets/tabs each user currently has, so we only
-// flip someone to "offline" once their very last connection drops.
-const onlineSocketsByUser = new Map();
-
 function initSockets(io, sessionMiddleware) {
+  // Online/offline is decided through the database (atomic flag flips) and a
+  // cluster-wide socket count — NOT an in-process Map — so it stays correct
+  // with several server instances. See handleConnection.
+  const presence = createPresenceTracker({ graceMs: Number(process.env.PRESENCE_GRACE_MS ?? 3000) });
+
   // Socket.IO doesn't know about Express sessions by default. Wrapping the
   // session middleware like this lets every socket read `socket.request.session`,
   // the same cookie-backed session the HTTP routes use — one login, shared
@@ -38,10 +42,12 @@ function initSockets(io, sessionMiddleware) {
     next(new Error('unauthorized'));
   });
 
-  io.on('connection', (socket) => handleConnection(io, socket));
+  io.on('connection', (socket) => handleConnection(io, socket, presence));
+
+  return { presence };
 }
 
-async function handleConnection(io, socket) {
+async function handleConnection(io, socket, presence) {
   const userId = socket.request.session.userId;
 
   // A private room just for this user, used to push events (like "a new
@@ -51,18 +57,19 @@ async function handleConnection(io, socket) {
   const myChats = await Chat.find({ participants: userId, ...visibleToMe(userId) }).select('_id');
   myChats.forEach((chat) => socket.join(chat._id.toString()));
 
-  const sockets = onlineSocketsByUser.get(userId) || new Set();
-  const wasOffline = sockets.size === 0;
-  sockets.add(socket.id);
-  onlineSocketsByUser.set(userId, sockets);
+  // Back within the grace period of a disconnect? Then they never went offline.
+  presence.cancel(userId);
 
-  if (wasOffline) {
-    const updatedUser = await User.findByIdAndUpdate(userId, { isOnline: true }, { new: true }).select(
-      'privacy.showLastSeen'
-    );
-    if (updatedUser?.privacy?.showLastSeen !== false) {
-      broadcastPresence(io, await presentableRooms(userId, presenceRooms(socket), Chat), 'user-online', { userId });
-    }
+  // Flip to online ATOMICALLY: only the connection that actually changes the
+  // flag (false -> true) announces it. That's exactly-once even with several
+  // tabs, several instances, or a reconnect racing a pending "offline".
+  const cameOnline = await User.findOneAndUpdate(
+    { _id: userId, isOnline: { $ne: true } },
+    { isOnline: true },
+    { new: true }
+  ).select('privacy.showLastSeen');
+  if (cameOnline && cameOnline.privacy?.showLastSeen !== false) {
+    broadcastPresence(io, await presentableRooms(userId, presenceRooms(socket), Chat), 'user-online', { userId });
   }
 
   // Called when the client opens a chat that was created after this socket
@@ -79,7 +86,7 @@ async function handleConnection(io, socket) {
       socket.join(chatId);
       ack?.({ ok: true });
     } catch (err) {
-      console.error('[socket] join-chat failed:', err.message);
+      logger.error('[socket] join-chat failed:', err.message);
       ack?.({ error: 'Could not join chat' });
     }
   });
@@ -104,7 +111,7 @@ async function handleConnection(io, socket) {
       await markChatRead({ chatId, userId, io });
       ack?.({ ok: true });
     } catch (err) {
-      console.error('[socket] mark-read failed:', err.message);
+      logger.error('[socket] mark-read failed:', err.message);
       ack?.({ error: 'Could not mark as read' });
     }
   });
@@ -221,7 +228,7 @@ async function handleConnection(io, socket) {
       io.to(chatId).emit('new-message', serialized);
       ack?.({ ok: true, message: serialized });
     } catch (err) {
-      console.error('[socket] send-message failed:', err.message);
+      logger.error('[socket] send-message failed:', err.message);
       ack?.({ error: 'Could not send message' });
     }
   });
@@ -230,26 +237,29 @@ async function handleConnection(io, socket) {
   // which rooms it was in, which is exactly what we need to notify the
   // right chats that this user went offline.
   socket.on('disconnecting', () => {
-    const sockets = onlineSocketsByUser.get(userId);
-    if (!sockets) return;
-    sockets.delete(socket.id);
+    // Captured now, synchronously — socket.rooms is only guaranteed populated up to this point.
+    const rooms = presenceRooms(socket);
 
-    if (sockets.size === 0) {
-      onlineSocketsByUser.delete(userId);
-      const lastSeen = new Date();
-      // Captured now, synchronously — socket.rooms is only guaranteed
-      // populated up to this point, and the privacy check below is async.
-      const rooms = presenceRooms(socket);
-
-      User.findByIdAndUpdate(userId, { isOnline: false, lastSeen }, { new: true })
-        .select('privacy.showLastSeen')
-        .then(async (updatedUser) => {
-          if (updatedUser?.privacy?.showLastSeen !== false) {
-            broadcastPresence(io, await presentableRooms(userId, rooms, Chat), 'user-offline', { userId, lastSeen });
-          }
-        })
-        .catch((err) => console.error('[socket] failed to mark offline:', err.message));
-    }
+    // Wait out the grace period (page refreshes, flaky networks), then count
+    // what's left ACROSS THE CLUSTER: still connected somewhere? Then they're
+    // still online. Otherwise flip the flag atomically so exactly one
+    // instance announces it.
+    presence.scheduleOffline(userId, async () => {
+      try {
+        if ((await io.in(`user:${userId}`).fetchSockets()).length > 0) return;
+        const lastSeen = new Date();
+        const wentOffline = await User.findOneAndUpdate(
+          { _id: userId, isOnline: true },
+          { isOnline: false, lastSeen },
+          { new: true }
+        ).select('privacy.showLastSeen');
+        if (wentOffline && wentOffline.privacy?.showLastSeen !== false) {
+          broadcastPresence(io, await presentableRooms(userId, rooms, Chat), 'user-offline', { userId, lastSeen });
+        }
+      } catch (err) {
+        logger.error('[socket] failed to mark offline:', err.message);
+      }
+    });
   });
 }
 

@@ -1,0 +1,39 @@
+# One command to run everything:
+#   cp .env.example .env     # then set SESSION_SECRET and CLOUD_ENCRYPTION_KEY
+#   docker compose up --build
+# App at http://localhost:3000. For several instances behind a load balancer
+# see docker-compose.scale.yml.
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/unisontalk
+      UPLOAD_DIR: /data/uploads
+      # Plain-HTTP localhost: Secure cookies would never be set. Remove this
+      # (and put TLS in front) for a real deployment.
+      COOKIE_SECURE: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
+  uploads:

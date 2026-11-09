@@ -4,7 +4,7 @@ const multer = require('multer');
 
 // Avatars differ from chat attachments (middleware/upload.js): always
 // plain, always publicly viewable, always genuinely images.
-const AVATAR_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
+const { AVATARS_DIR: AVATAR_DIR } = require('../config/paths');
 
 // The stored extension comes from the validated MIME type, NEVER from the
 // uploaded filename — otherwise "evil.html" declared as image/png would be

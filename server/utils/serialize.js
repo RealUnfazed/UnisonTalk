@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const logger = require('./logger');
 const { decryptField } = require('./fieldCrypto');
 
 // `viewerId` decides what this person is allowed to see of `user`'s
@@ -106,7 +107,7 @@ function decryptCloudText(ciphertext, iv) {
   try {
     return decryptField(ciphertext, iv);
   } catch (err) {
-    console.error('[serialize] failed to decrypt a cloud field:', err.message);
+    logger.error('[serialize] failed to decrypt a cloud field:', err.message);
     return '[This message could not be decrypted]';
   }
 }

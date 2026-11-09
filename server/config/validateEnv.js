@@ -18,6 +18,12 @@ function validateEnv(env = process.env) {
   if (prod && !env.TRUST_PROXY) {
     warnings.push('TRUST_PROXY is not set. Behind a TLS-terminating proxy, secure cookies and per-IP rate limiting need it.');
   }
+  if (env.REDIS_URL && !/^rediss?:\/\//.test(env.REDIS_URL)) {
+    errors.push('REDIS_URL must start with redis:// or rediss:// (TLS).');
+  }
+  if (env.LOG_LEVEL && !['debug', 'info', 'warn', 'error', 'silent'].includes(env.LOG_LEVEL)) {
+    warnings.push(`LOG_LEVEL "${env.LOG_LEVEL}" is not one of debug, info, warn, error, silent — using info.`);
+  }
   return { errors, warnings };
 }
 

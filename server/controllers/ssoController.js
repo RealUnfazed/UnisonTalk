@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const logger = require('../utils/logger');
 const User = require('../models/User');
 const { serializeUser } = require('../utils/serialize');
 const { getPhasetimeConfig } = require('../config/phasetime');
@@ -71,7 +72,7 @@ async function handleCallback(req, res) {
   if (error) return onFailure(String(error));
   if (!code) return onFailure('missing_code');
   if (state && expectedState && state !== expectedState) {
-    console.error('[sso] state mismatch on Phasetime callback — possible CSRF attempt');
+    logger.error('[sso] state mismatch on Phasetime callback — possible CSRF attempt');
     return onFailure('state_mismatch');
   }
 
@@ -88,7 +89,7 @@ async function handleCallback(req, res) {
       }),
     });
     if (!tokenRes.ok) {
-      console.error('[sso] token exchange failed:', tokenRes.status);
+      logger.error('[sso] token exchange failed:', tokenRes.status);
       return onFailure('token_exchange_failed');
     }
     const { access_token: accessToken } = await tokenRes.json();
@@ -98,7 +99,7 @@ async function handleCallback(req, res) {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!profileRes.ok) {
-      console.error('[sso] userinfo fetch failed:', profileRes.status);
+      logger.error('[sso] userinfo fetch failed:', profileRes.status);
       return onFailure('userinfo_failed');
     }
     const profile = await profileRes.json(); // { id, name, email }
@@ -144,7 +145,7 @@ async function handleCallback(req, res) {
     await establishSession(req, user._id.toString()); // fresh session ID at the moment of login
     res.redirect('/');
   } catch (err) {
-    console.error('[sso] callback failed:', err.message);
+    logger.error('[sso] callback failed:', err.message);
     onFailure('unexpected_error');
   }
 }

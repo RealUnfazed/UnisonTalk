@@ -2,7 +2,7 @@ const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
 
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const { UPLOADS_DIR: UPLOAD_DIR } = require('../config/paths');
 
 // Attachments arrive in one of two shapes, decided by the chat they
 // belong to: opaque AES-GCM ciphertext for a Secret Chat, or a normal

@@ -16,8 +16,8 @@ const router = express.Router();
 router.use(requireAuth); // every route below requires a logged-in session
 
 const byUser = (req) => req.session.userId;
-const uploadLimiter = rateLimit({ windowMs: 10 * 60_000, max: 60, key: byUser, message: 'Too many uploads. Please slow down.' });
-const searchLimiter = rateLimit({ windowMs: 60_000, max: 60, key: byUser, message: 'Too many searches. Please slow down.' });
+const uploadLimiter = rateLimit({ name: 'upload', windowMs: 10 * 60_000, max: 60, key: byUser, message: 'Too many uploads. Please slow down.' });
+const searchLimiter = rateLimit({ name: 'search', windowMs: 60_000, max: 60, key: byUser, message: 'Too many searches. Please slow down.' });
 
 router.get('/chats', chatController.listChats);
 router.post('/chats/private', chatController.createPrivateChat);

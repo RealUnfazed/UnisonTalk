@@ -7,7 +7,7 @@ const { encryptField } = require('../utils/fieldCrypto');
 const { deleteAttachmentFile } = require('../utils/uploadCleanup');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
 
-const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
+const { UPLOADS_DIR: UPLOADS_ROOT } = require('../config/paths');
 const EDIT_WINDOW_MS = 48 * 60 * 60 * 1000; // same as Telegram
 
 // Shared by edit and delete: the message must exist, not already be

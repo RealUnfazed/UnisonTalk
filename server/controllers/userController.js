@@ -4,7 +4,7 @@ const Chat = require('../models/Chat');
 const { serializeUser } = require('../utils/serialize');
 const { discardUploadedFile, deleteAvatarFile } = require('../utils/uploadCleanup');
 
-const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
+const { UPLOADS_DIR: UPLOADS_ROOT } = require('../config/paths');
 
 // A single flexible endpoint for the whole "Settings" panel rather than
 // one route per field — the client only ever sends the fields that

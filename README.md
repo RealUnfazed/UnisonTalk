@@ -38,6 +38,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [Groups, blocking & notifications](#groups-blocking--notifications)
 - [Messages, read state & unread counts](#messages-read-state--unread-counts)
 - [Security hardening](#security-hardening)
+- [Deployment & operations](#deployment--operations)
 - [Testing](#testing)
 - [Contributing](#contributing)
 - [License](#license)
@@ -258,13 +259,44 @@ Deliberately simpler than Telegram: no "My Contacts" tier (there's no contacts l
 
 Everything below ships in the repo and is covered by tests; see [SECURITY.md](./SECURITY.md) for the threat model and known limits.
 
-- **Rate limiting** (in-memory, per process): login is limited per account+IP and per IP, registration per IP, uploads/search per user, plus a global API cap. Responses are `429` with `Retry-After`.
+- **Rate limiting** (in-memory per process, or shared across instances through Redis — see Deployment): login is limited per account+IP and per IP, registration per IP, uploads/search per user, plus a global API cap. Responses are `429` with `Retry-After`.
 - **Sessions:** a fresh session ID is issued on every login/registration/SSO sign-in (no session fixation); `Secure` cookies in production; passwords are compared in constant-ish time whether or not the account exists, so response time doesn't reveal usernames.
 - **Headers:** `nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, COOP, HSTS (production + HTTPS), and a Content-Security-Policy that **starts in report-only mode** — load the app, check the browser console, then set `CSP_MODE=enforce`.
 - **Uploads:** chat attachments are no longer public static files — they're served only to logged-in members of a chat that contains them, as inline images for safe raster types and sandboxed downloads for everything else (so an uploaded `.html`/`.svg` can never run as a page on your origin). Avatar file extensions come from the validated image type, never the filename. Attachment metadata received over the socket is rebuilt from validated fields (no arbitrary URLs → no tracking-pixel/IP-leak links). Rejected, replaced and abandoned uploads are cleaned up.
 - **Input handling:** every controller is wrapped so an unexpected error becomes a logged 500 rather than a crashed process; request bodies and socket payloads are type-checked; search input is escaped (no regex injection/ReDoS); socket `typing` events are only relayed into rooms you've actually joined.
 - **Configuration:** the server refuses to start in production with a weak `SESSION_SECRET`; CORS allows nothing cross-origin in production unless `ALLOWED_ORIGIN` is set. See `.env.example` for `NODE_ENV`, `TRUST_PROXY`, `COOKIE_SECURE` and `CSP_MODE`.
 - **Supply chain:** Dependabot (npm + GitHub Actions) and a non-blocking `npm audit` job in CI.
+
+## Deployment & operations
+
+### Docker, one instance
+
+```bash
+cp .env.example .env        # set SESSION_SECRET and CLOUD_ENCRYPTION_KEY (see Security hardening)
+docker compose up --build   # app on http://localhost:3000, with MongoDB
+```
+
+Data lives in two named volumes (`mongo-data`, `uploads`). The compose file sets `COOKIE_SECURE=false` so login works over plain-HTTP localhost — **remove it** once you're behind TLS (and set `TRUST_PROXY`). The image runs as an unprivileged user, has a health check, and handles `docker stop` gracefully.
+
+### Several instances
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up --build --scale app=2   # http://localhost:8080
+```
+
+Adds Redis and an nginx load balancer (`deploy/nginx.conf`). Setting `REDIS_URL` makes instances cooperate: **Socket.IO rooms and broadcasts span all instances** (a message sent through one reaches sockets on another) and **rate-limit counters are shared** (if Redis goes down they fail *open* to per-instance counters rather than locking everyone out). Without `REDIS_URL` nothing changes — it's a single process and the `redis` package is never loaded. Things to know:
+
+- **Sticky sessions or WebSocket-only.** Socket.IO starts with several HTTP long-polling requests that must hit the same instance. Either enable stickiness on your load balancer (the sample uses `ip_hash`) or go WebSocket-only: `SOCKET_TRANSPORTS=websocket` on the server **and** `SOCKET_TRANSPORTS = ['websocket']` in `client/src/config.js`.
+- **`TRUST_PROXY`** must be set behind a proxy, or every client looks like the proxy's IP (breaking per-IP rate limits).
+- **Uploads are still on local disk.** The sample shares one volume between instances, which only works on a single host. Running across hosts needs object storage (S3) — the next phase.
+- nginx resolves the app replicas when it starts; restart it after scaling.
+
+### Health, logs, shutdown
+
+- `GET /healthz` — liveness (always cheap). `GET /readyz` — readiness: checks MongoDB (and Redis when configured) and goes `503` during shutdown so the load balancer drains the instance. Neither creates sessions or is rate-limited, and failures name the dependency but never the reason.
+- **Logs** are structured: `LOG_FORMAT=json` (the default in production) writes one JSON object per line for your log aggregator; `pretty` is for terminals. `LOG_LEVEL` is `debug|info|warn|error|silent`. Every request gets an id (an upstream `X-Request-Id` is honoured if well-formed), echoed in the `X-Request-Id` header and included in the body of any 500 so a user's report can be matched to a log line. Keys that look like secrets (`password`, `token`, `cookie`, `authorization`, ...) are redacted at any depth, and **query strings are never logged** (the SSO callback carries a code there).
+- **Graceful shutdown** (SIGTERM/SIGINT): fail readiness, optionally wait `SHUTDOWN_DRAIN_MS` for the balancer, drop this instance's sockets, settle presence, then close HTTP, Redis, sessions and MongoDB — with a `SHUTDOWN_TIMEOUT_MS` hard stop.
+- **Presence** is a MongoDB flag flipped atomically (so exactly one instance announces each change) plus a cluster-wide socket count, with a `PRESENCE_GRACE_MS` delay before "offline": refreshing the page or a flaky connection no longer flickers someone offline. If a process is killed without a graceful shutdown, its users can stay "online" until they reconnect and disconnect again.
 
 ## Testing
 
