@@ -38,6 +38,7 @@ client/   Framework-free static JS app (its own model/view/controller split).
 - [Groups, blocking & notifications](#groups-blocking--notifications)
 - [Messages, read state & unread counts](#messages-read-state--unread-counts)
 - [Security hardening](#security-hardening)
+- [File storage](#file-storage)
 - [Deployment & operations](#deployment--operations)
 - [Testing](#testing)
 - [Contributing](#contributing)
@@ -172,7 +173,7 @@ All of this is built on the browser's native `crypto.subtle` — no third-party 
 
 | Cloud Chats | Secret Chats |
 |---|---|
-| **Encrypted at rest** with a server-held key (`CLOUD_ENCRYPTION_KEY`, see `server/utils/fieldCrypto.js`) — the server still processes them normally (that's what makes "log in anywhere, see everything" possible with zero client-side key management), but a raw database dump, stolen backup, or leaked DB credentials yield ciphertext, *provided the encryption key wasn't also exposed* — it deliberately lives only in the environment, never in the database. This does not protect against a fully compromised, running server process, which has the key loaded to do its job — same trade-off as disk encryption or any server-side KMS. | Server and database only ever hold ciphertext, and the server never has the key *at all*, not even in memory. A full database compromise or legal request for stored data does not expose Secret Chat contents, full stop — there's no key on the server side to also compromise. |
+| **Encrypted at rest** with a server-held key (`CLOUD_ENCRYPTION_KEY`, see `server/utils/fieldCrypto.js`) — the server still processes them normally (that's what makes "log in anywhere, see everything" possible with zero client-side key management), but a raw database dump, stolen backup, or leaked DB credentials yield ciphertext, *provided the encryption key wasn't also exposed* — it deliberately lives only in the environment, never in the database. This does not protect against a fully compromised, running server process, which has the key loaded to do its job — same trade-off as disk encryption or any server-side KMS. Uploaded files are encrypted at rest the same way — see [File storage](#file-storage). | Server and database only ever hold ciphertext, and the server never has the key *at all*, not even in memory. A full database compromise or legal request for stored data does not expose Secret Chat contents, full stop — there's no key on the server side to also compromise. |
 
 For Secret Chats specifically, being upfront about what the encryption does and doesn't protect against matters more than the phrase "end-to-end encrypted" on its own:
 
@@ -262,10 +263,38 @@ Everything below ships in the repo and is covered by tests; see [SECURITY.md](./
 - **Rate limiting** (in-memory per process, or shared across instances through Redis — see Deployment): login is limited per account+IP and per IP, registration per IP, uploads/search per user, plus a global API cap. Responses are `429` with `Retry-After`.
 - **Sessions:** a fresh session ID is issued on every login/registration/SSO sign-in (no session fixation); `Secure` cookies in production; passwords are compared in constant-ish time whether or not the account exists, so response time doesn't reveal usernames.
 - **Headers:** `nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, COOP, HSTS (production + HTTPS), and a Content-Security-Policy that **starts in report-only mode** — load the app, check the browser console, then set `CSP_MODE=enforce`.
-- **Uploads:** chat attachments are no longer public static files — they're served only to logged-in members of a chat that contains them, as inline images for safe raster types and sandboxed downloads for everything else (so an uploaded `.html`/`.svg` can never run as a page on your origin). Avatar file extensions come from the validated image type, never the filename. Attachment metadata received over the socket is rebuilt from validated fields (no arbitrary URLs → no tracking-pixel/IP-leak links). Rejected, replaced and abandoned uploads are cleaned up.
+- **Uploads:** chat attachments are no longer public static files — they're served only to logged-in members of a chat that contains them, as inline images for safe raster types and sandboxed downloads for everything else (so an uploaded `.html`/`.svg` can never run as a page on your origin). Avatar file extensions come from the validated image type, never the filename. Attachment metadata received over the socket is rebuilt from validated fields (no arbitrary URLs → no tracking-pixel/IP-leak links). Rejected, replaced and abandoned uploads are cleaned up. Files are encrypted at rest, avatars have their EXIF/GPS metadata stripped, and storage can be local disk or S3 — see [File storage](#file-storage).
 - **Input handling:** every controller is wrapped so an unexpected error becomes a logged 500 rather than a crashed process; request bodies and socket payloads are type-checked; search input is escaped (no regex injection/ReDoS); socket `typing` events are only relayed into rooms you've actually joined.
 - **Configuration:** the server refuses to start in production with a weak `SESSION_SECRET`; CORS allows nothing cross-origin in production unless `ALLOWED_ORIGIN` is set. See `.env.example` for `NODE_ENV`, `TRUST_PROXY`, `COOKIE_SECURE` and `CSP_MODE`.
 - **Supply chain:** Dependabot (npm + GitHub Actions) and a non-blocking `npm audit` job in CI.
+
+## File storage
+
+Uploads go through one storage layer with two drivers, chosen by `STORAGE_DRIVER`:
+
+| | `local` (default) | `s3` |
+|---|---|---|
+| Where | `UPLOAD_DIR` (default `server/uploads`) | any S3-compatible bucket: AWS S3, MinIO, Cloudflare R2, Backblaze B2, DigitalOcean Spaces |
+| Config | — | `S3_BUCKET` (required), `S3_REGION`, `S3_PREFIX`, `S3_ENDPOINT` + `S3_FORCE_PATH_STYLE=true` for non-AWS stores, `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` (omit both to use an IAM role or the default AWS credential chain), `S3_SSE` (`AES256`/`aws:kms`) |
+| Several hosts | needs a shared volume | works out of the box — instances are stateless |
+
+The bucket needs `s3:PutObject`, `GetObject`, `DeleteObject` and `ListBucket` (the readiness check also does `HeadBucket`). Files are streamed **through the server** (so access control and decryption stay in one place) rather than via pre-signed URLs; that costs server bandwidth, and uploads are held in memory up to the 20 MB cap.
+
+**Chat attachments are encrypted at rest** whichever driver is used: AES-256-GCM with a key derived (HKDF) from `CLOUD_ENCRYPTION_KEY`, with each file's storage key bound in as authenticated data — so a stolen disk or bucket (or a bucket admin) sees only ciphertext, a flipped bit is detected, and ciphertext swapped between two files is refused rather than served. Secret Chat attachments are already end-to-end encrypted by the browser and get this second layer on top. Avatars are public by design and are not encrypted. Back up `CLOUD_ENCRYPTION_KEY` with the files: **losing it loses every attachment** (there is no key rotation yet).
+
+**Avatars are sanitised before storage:** the bytes must really be the image type the upload claims; then all metadata is removed — phone photos carry EXIF with GPS coordinates, device model and timestamps, and avatars are public. With the optional `sharp` package installed (it is by default) avatars are also auto-rotated and resized to fit 512×512, and GIFs become a still PNG; without it, metadata is stripped losslessly in pure JavaScript (orientation is preserved so photos don't turn sideways, and animated GIFs keep animating). Appended "trailing data" is dropped too. *Attachments shared as files keep whatever metadata they have* — they're sent as-is, like any file.
+
+**Moving to S3 or enabling encryption on an existing install** (uploads from before this version are plaintext and keep working until converted):
+
+```bash
+npm run storage:encrypt                                   # encrypt existing attachments in place (safe to re-run)
+# or, to move local uploads into a bucket:
+STORAGE_DRIVER=s3 S3_BUCKET=my-bucket ... node scripts/storage.js copy --from ./server/uploads
+STORAGE_DRIVER=s3 S3_BUCKET=my-bucket ... node scripts/storage.js encrypt
+# in Docker:  docker compose exec app node scripts/storage.js encrypt
+```
+
+Orphaned uploads (abandoned compose, replaced avatars whose delete failed) are swept from whichever store is configured once they're a day old.
 
 ## Deployment & operations
 
@@ -288,7 +317,7 @@ Adds Redis and an nginx load balancer (`deploy/nginx.conf`). Setting `REDIS_URL`
 
 - **Sticky sessions or WebSocket-only.** Socket.IO starts with several HTTP long-polling requests that must hit the same instance. Either enable stickiness on your load balancer (the sample uses `ip_hash`) or go WebSocket-only: `SOCKET_TRANSPORTS=websocket` on the server **and** `SOCKET_TRANSPORTS = ['websocket']` in `client/src/config.js`.
 - **`TRUST_PROXY`** must be set behind a proxy, or every client looks like the proxy's IP (breaking per-IP rate limits).
-- **Uploads are still on local disk.** The sample shares one volume between instances, which only works on a single host. Running across hosts needs object storage (S3) — the next phase.
+- **Uploads: shared volume or S3.** With the default `local` driver the sample shares one volume between instances, which only works on a single host. For several hosts (or ephemeral containers) set `STORAGE_DRIVER=s3` — instances are then stateless; see [File storage](#file-storage).
 - nginx resolves the app replicas when it starts; restart it after scaling.
 
 ### Health, logs, shutdown
@@ -308,7 +337,7 @@ npm run test:integration # boots the real app against an in-memory MongoDB
 npm run check            # syntax-check every file (also runs first in CI)
 ```
 
-Tests use Node's built-in runner (no Jest). **Unit tests** cover the crypto (Secret Chat encrypt/decrypt, key export/import, tamper detection; Cloud encryption at rest), the serializers (privacy rules, per-viewer chat naming, decrypt-on-read) and username sanitisation. **Integration tests** drive the real Express app with `supertest` against `mongodb-memory-server` (it downloads a `mongod` binary on first run), covering registration/login, the Phasetime flow against a mock provider (including CSRF/state handling, linking, unlinking), profile/privacy/search, chat visibility and group editing. They include regressions for real bugs found so far — e.g. issue #14 (duplicate `phasetimeId: null`) and the wrong-name-for-the-recipient chat bug. GitHub Actions runs everything on Node 20 and 22.
+Tests use Node's built-in runner (no Jest). **Unit tests** cover the crypto (Secret Chat encrypt/decrypt, key export/import, tamper detection; Cloud encryption at rest), the serializers (privacy rules, per-viewer chat naming, decrypt-on-read) username sanitisation, the storage drivers (one contract run against local disk, S3 via a fake client, and memory), attachment encryption (tamper and swap detection), and the avatar metadata stripper — checked against real JPEG/PNG/WebP/GIF files generated with Pillow. **Integration tests** drive the real Express app with `supertest` against `mongodb-memory-server` (it downloads a `mongod` binary on first run), covering registration/login, the Phasetime flow against a mock provider (including CSRF/state handling, linking, unlinking), profile/privacy/search, chat visibility and group editing, uploads (encrypted on disk, tamper detection) and avatar hygiene. They include regressions for real bugs found so far — e.g. issue #14 (duplicate `phasetimeId: null`) and the wrong-name-for-the-recipient chat bug. GitHub Actions runs everything on Node 20 and 22.
 
 Not covered yet: the Socket.IO layer (encryption-at-rest on the actual message write path, first-message chat notification, presence broadcasts) and the browser UI.
 

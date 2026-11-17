@@ -1,73 +1,63 @@
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { sweepOrphanUploads, discardUploadedFile, deleteAvatarFile } = require('../../server/utils/uploadCleanup');
+const { MemoryStorage } = require('../../server/storage/memoryDriver');
+const { sweepOrphanUploads, deleteStoredAttachment, deleteStoredAvatar, attachmentKeyFromUrl, avatarKeyFromUrl } = require('../../server/utils/uploadCleanup');
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const HOUR = 3600_000;
+const HOUR = 3_600_000;
+const longAgo = () => new Date(Date.now() - 5 * HOUR);
 
-describe('upload cleanup', () => {
-  let dir;
-  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'unisontalk-')); });
-  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
-
-  const touch = (name, ageMs = 0) => {
-    const file = path.join(dir, name);
-    fs.writeFileSync(file, 'x');
-    const t = (Date.now() - ageMs) / 1000;
-    fs.utimesSync(file, t, t);
-    return file;
-  };
-
-  it('removes old unreferenced files only', async () => {
-    touch('old-orphan.bin', 5 * HOUR);
-    touch('old-used.bin', 5 * HOUR);
-    touch('young-orphan.bin', 60_000); // its message may not have been sent yet
-    touch('.gitkeep', 5 * HOUR);
-    fs.mkdirSync(path.join(dir, 'avatars'));
-
-    const removed = await sweepOrphanUploads({ dir, olderThanMs: HOUR, isReferenced: (n) => n === 'old-used.bin' });
-    assert.deepEqual(removed, ['old-orphan.bin']);
-    assert.deepEqual(fs.readdirSync(dir).sort(), ['.gitkeep', 'avatars', 'old-used.bin', 'young-orphan.bin']);
+describe('upload URL <-> storage key', () => {
+  it('maps exactly the URL shapes the app produces', () => {
+    assert.equal(attachmentKeyFromUrl('/uploads/1-a.bin'), '1-a.bin');
+    assert.equal(avatarKeyFromUrl('/uploads/avatars/1-a.png'), 'avatars/1-a.png');
   });
 
-  it('awaits async reference checks and tolerates a missing directory', async () => {
-    touch('a.bin', 5 * HOUR);
-    const removed = await sweepOrphanUploads({ dir, olderThanMs: HOUR, isReferenced: async () => true });
-    assert.deepEqual(removed, []);
-    assert.deepEqual(await sweepOrphanUploads({ dir: path.join(dir, 'nope'), olderThanMs: 0, isReferenced: () => false }), []);
+  it('refuses everything else — other prefixes, traversal, dotfiles, foreign hosts, non-strings', () => {
+    const notAttachments = ['/uploads/avatars/x.png', '/uploads/../x', '/uploads/..', '/uploads/a..b', '/uploads/.hidden', '/uploads/', '/uploads/a/b', 'https://evil.example/uploads/x.bin', '/uploads/x y', `/uploads/${'x'.repeat(121)}`, '', null, undefined, 42, {}];
+    for (const url of notAttachments) assert.equal(attachmentKeyFromUrl(url), null, String(url));
+    const notAvatars = ['/uploads/x.png', '/uploads/avatars/../x', '/uploads/avatars/.hidden', '/uploads/avatars/', '/uploads/avatars/a/b', '/uploads/avatars/a..b', null, undefined, 42];
+    for (const url of notAvatars) assert.equal(avatarKeyFromUrl(url), null, String(url));
+  });
+});
+
+describe('sweepOrphanUploads', () => {
+  it('removes old unreferenced files only, per prefix', async () => {
+    const storage = new MemoryStorage();
+    for (const key of ['old-orphan.bin', 'old-used.bin', 'young.bin', 'avatars/old-avatar.png', 'avatars/used-avatar.png']) await storage.put(key, Buffer.from('x'));
+    for (const key of ['old-orphan.bin', 'old-used.bin', 'avatars/old-avatar.png', 'avatars/used-avatar.png']) storage.setLastModified(key, longAgo());
+
+    const attachments = await sweepOrphanUploads({ storage, prefix: '', olderThanMs: HOUR, isReferenced: async (name) => name === 'old-used.bin' });
+    const avatars = await sweepOrphanUploads({ storage, prefix: 'avatars/', olderThanMs: HOUR, isReferenced: async (name) => name === 'used-avatar.png' });
+    assert.deepEqual(attachments, ['old-orphan.bin']);
+    assert.deepEqual(avatars, ['old-avatar.png']);
+    assert.deepEqual((await storage.list('')).map((e) => e.name).sort(), ['old-used.bin', 'young.bin']);
+    assert.deepEqual((await storage.list('avatars/')).map((e) => e.name), ['used-avatar.png']);
   });
 
-  it('discardUploadedFile removes the rejected upload and ignores missing input', async () => {
-    const file = touch('rejected.bin');
-    discardUploadedFile({ path: file });
-    discardUploadedFile(undefined);
-    discardUploadedFile({ path: path.join(dir, 'does-not-exist') });
-    await sleep(50);
-    assert.ok(!fs.existsSync(file));
+  it("lets a storage failure surface (so the scheduler logs it) instead of pretending nothing was wrong", async () => {
+    const storage = { list: async () => { throw new Error('S3 is down'); } };
+    await assert.rejects(sweepOrphanUploads({ storage, prefix: '', olderThanMs: HOUR, isReferenced: () => false }), /S3 is down/);
+  });
+});
+
+describe('deleting a message\'s or avatar\'s stored file', () => {
+  before(() => { process.env.LOG_LEVEL = 'silent'; });
+  after(() => { delete process.env.LOG_LEVEL; });
+
+  it('deletes exactly the file the URL names, and nothing for URLs that do not parse', async () => {
+    const storage = new MemoryStorage();
+    for (const key of ['1-a.bin', '2-b.bin', 'avatars/3-c.png']) await storage.put(key, Buffer.from('x'));
+    await deleteStoredAttachment(storage, '/uploads/1-a.bin');
+    await deleteStoredAvatar(storage, '/uploads/avatars/3-c.png');
+    for (const url of ['/uploads/avatars/3-c.png', '/uploads/../2-b.bin', null, undefined, 'https://evil.example/uploads/2-b.bin']) await deleteStoredAttachment(storage, url);
+    for (const url of ['/uploads/2-b.bin', '/uploads/avatars/../2-b.bin', null]) await deleteStoredAvatar(storage, url);
+    assert.deepEqual((await storage.list('')).map((e) => e.name), ['2-b.bin']);
+    assert.deepEqual(await storage.list('avatars/'), []);
   });
 
-  it('deleteAvatarFile only ever touches files directly inside /uploads/avatars/', async () => {
-    fs.mkdirSync(path.join(dir, 'avatars'));
-    const avatar = path.join(dir, 'avatars', 'x.png');
-    const outside = path.join(dir, 'secret.txt');
-    fs.writeFileSync(avatar, 'x');
-    fs.writeFileSync(outside, 'keep me');
-
-    deleteAvatarFile('/uploads/avatars/../secret.txt', dir);
-    deleteAvatarFile('/uploads/secret.txt', dir);
-    deleteAvatarFile('/uploads/avatars/.hidden', dir);
-    deleteAvatarFile('/uploads/avatars/..', dir);
-    deleteAvatarFile(null, dir);
-    deleteAvatarFile('https://evil.example/uploads/avatars/x.png', dir);
-    await sleep(50);
-    assert.ok(fs.existsSync(outside) && fs.existsSync(avatar));
-
-    deleteAvatarFile('/uploads/avatars/x.png', dir);
-    await sleep(50);
-    assert.ok(!fs.existsSync(avatar));
-    assert.ok(fs.existsSync(outside));
+  it('swallows a failing delete (the orphan sweep will retry) rather than failing the request', async () => {
+    const storage = { delete: async () => { throw new Error('network'); } };
+    await assert.doesNotReject(deleteStoredAttachment(storage, '/uploads/1-a.bin'));
+    await assert.doesNotReject(deleteStoredAvatar(storage, '/uploads/avatars/1-a.png'));
   });
 });

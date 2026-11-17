@@ -5,8 +5,6 @@ const { serializeMessage, serializeChat } = require('../utils/serialize');
 const { encryptField } = require('../utils/fieldCrypto');
 const { visibleToMe } = require('../utils/chatVisibility');
 const CHAT_POPULATE = require('../utils/chatPopulate');
-const fs = require('node:fs');
-const path = require('node:path');
 const mongoose = require('mongoose');
 const { sanitizeAttachment } = require('../utils/validateAttachment');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
@@ -14,9 +12,9 @@ const { setReadMarker, markChatRead } = require('../utils/readState');
 const { blockedBetween, presentableRooms } = require('../utils/blocks');
 const logger = require('../utils/logger');
 const { createPresenceTracker } = require('./presence');
-const { UPLOADS_DIR } = require('../config/paths');
+const { getStorage } = require('../storage');
+const { attachmentKeyFromUrl } = require('../utils/uploadCleanup');
 
-const UPLOAD_DIR = UPLOADS_DIR;
 const isId = (v) => typeof v === 'string' && mongoose.isValidObjectId(v);
 // Socket payloads are whatever the client sends — including null, numbers or
 // arrays. Destructuring null in a handler's parameter list throws inside
@@ -173,7 +171,8 @@ async function handleConnection(io, socket, presence) {
         // URLs or metadata as-is (see utils/validateAttachment.js).
         const checked = sanitizeAttachment(attachment, { isSecret: chat.isSecret });
         if (checked.error) return ack?.({ error: checked.error });
-        if (!fs.existsSync(path.join(UPLOAD_DIR, path.basename(checked.value.url)))) {
+        const attachmentKey = attachmentKeyFromUrl(checked.value.url);
+        if (!attachmentKey || !(await getStorage().exists(attachmentKey))) {
           return ack?.({ error: 'Attachment not found' });
         }
         if (!chat.isSecret) {

@@ -1,13 +1,12 @@
-const path = require('path');
 const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const { serializeMessage } = require('../utils/serialize');
 const { encryptField } = require('../utils/fieldCrypto');
-const { deleteAttachmentFile } = require('../utils/uploadCleanup');
+const { deleteStoredAttachment } = require('../utils/uploadCleanup');
+const { getStorage } = require('../storage');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
 
-const { UPLOADS_DIR: UPLOADS_ROOT } = require('../config/paths');
 const EDIT_WINDOW_MS = 48 * 60 * 60 * 1000; // same as Telegram
 
 // Shared by edit and delete: the message must exist, not already be
@@ -91,7 +90,7 @@ async function deleteMessage(req, res) {
       $unset: { content: 1, contentIv: 1, ciphertext: 1, iv: 1, attachment: 1, editedAt: 1, replyTo: 1 },
     }
   );
-  deleteAttachmentFile(fileUrl, UPLOADS_ROOT);
+  deleteStoredAttachment(getStorage(), fileUrl);
 
   const fresh = await Message.findById(message._id).populate(MESSAGE_POPULATE);
   const serialized = serializeMessage(fresh.toObject());

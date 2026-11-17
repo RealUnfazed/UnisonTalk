@@ -78,7 +78,7 @@ If you're looking for a place to start, these are areas the project could use he
 - A read-receipt / unread-count system (`Message` would need a `readBy` array, plus a socket event or two) — for Cloud Chats this is straightforward; for Secret Chats it needs some thought about what metadata is safe to leave unencrypted
 - Swapping local-disk attachment storage for S3-compatible storage
 - Encrypting Cloud Chat attachment *files* on disk with `CLOUD_ENCRYPTION_KEY` (currently only message text and filenames get this treatment via `server/utils/fieldCrypto.js` — the files themselves in `server/uploads/` are plain, unlike Secret Chat attachments which are ciphertext client-side already)
-- A `CLOUD_ENCRYPTION_KEY` rotation script (decrypt everything under the old key, re-encrypt under a new one) — there's currently no way to rotate this key without making existing Cloud Chat messages unreadable
+- A `CLOUD_ENCRYPTION_KEY` rotation script (decrypt everything under the old key — message text, filenames AND attachment files — and re-encrypt under a new one) — there's currently no way to rotate this key without making existing Cloud Chat messages and attachments unreadable
 - More tests: Socket.IO-level tests (encryption at rest on the message write path, first-message chat visibility, presence privacy) and browser-level tests of the client UI
 - Accessibility passes on the chat UI (keyboard navigation, screen reader labels)
 - Rate limiting on login/register/message-sending

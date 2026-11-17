@@ -14,7 +14,7 @@ describe('sanitizeAttachment — URL', () => {
   it('rejects anything that could point a recipient browser elsewhere', () => {
     const bad = ['https://evil.example/pixel.png', '//evil.example/x', 'javascript:alert(1)', 'data:text/html,hi',
       '/uploads/../package.json', '/uploads/..', '/uploads/avatars/x.png', '/uploads/a/b.bin', '/etc/passwd',
-      '/uploads/', '', '/uploads/x y.bin', 123, null, {}];
+      '/uploads/', '/uploads/.hidden', '/uploads/-dash.bin', '', '/uploads/x y.bin', 123, null, {}];
     for (const url of bad) assert.ok(cloud({ url }).error, `should reject ${JSON.stringify(url)}`);
     for (const url of bad) assert.ok(secret({ url }).error, `secret: should reject ${JSON.stringify(url)}`);
   });

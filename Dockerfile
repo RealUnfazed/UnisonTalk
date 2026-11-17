@@ -14,6 +14,7 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit
 
 COPY server ./server
 COPY client ./client
+COPY scripts ./scripts
 
 # Uploads live on a volume, owned by the unprivileged user the app runs as.
 RUN mkdir -p /data/uploads/avatars && chown -R node:node /data /app

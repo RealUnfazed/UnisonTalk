@@ -15,9 +15,8 @@ const mongoose = require('mongoose');
 const logger = require('./utils/logger');
 const { requestLogger } = require('./middleware/requestLogger');
 const { createHealthRouter } = require('./routes/healthRoutes');
-const { serveAttachment } = wrap(require('./controllers/uploadController'));
+const { serveAttachment, serveAvatar } = wrap(require('./controllers/uploadController'));
 
-const { UPLOADS_DIR } = require('./config/paths');
 
 // "1" / "2" = number of proxy hops, "true" = trust all, or a subnet name
 // like "loopback". Needed behind nginx/Render/Fly/etc. so req.ip, secure
@@ -92,7 +91,7 @@ function createApp() {
   // --- Uploads --------------------------------------------------------------
   // Avatars are public (they're shown to other people), and their file
   // extension comes from a validated image type, never from the upload's name.
-  app.use('/uploads/avatars', express.static(path.join(UPLOADS_DIR, 'avatars'), { index: false, dotfiles: 'deny', maxAge: '1d' }));
+  app.get('/uploads/avatars/:name', serveAvatar);
   // Chat attachments are NOT served statically: you must be logged in AND a
   // member of a chat that contains the file. See controllers/uploadController.js.
   app.get('/uploads/:filename', requireAuth, serveAttachment);

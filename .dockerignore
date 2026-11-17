@@ -6,7 +6,6 @@ npm-debug.log
 .env.*
 !.env.example
 tests
-scripts
 deploy
 *.md
 !README.md

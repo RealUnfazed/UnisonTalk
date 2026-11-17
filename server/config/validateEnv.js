@@ -24,6 +24,17 @@ function validateEnv(env = process.env) {
   if (env.LOG_LEVEL && !['debug', 'info', 'warn', 'error', 'silent'].includes(env.LOG_LEVEL)) {
     warnings.push(`LOG_LEVEL "${env.LOG_LEVEL}" is not one of debug, info, warn, error, silent — using info.`);
   }
+  const driver = (env.STORAGE_DRIVER || 'local').toLowerCase();
+  if (!['local', 's3'].includes(driver)) errors.push(`STORAGE_DRIVER must be "local" or "s3" (got "${env.STORAGE_DRIVER}").`);
+  if (driver === 's3') {
+    if (!env.S3_BUCKET) errors.push('S3_BUCKET is required when STORAGE_DRIVER=s3.');
+    if (Boolean(env.S3_ACCESS_KEY_ID) !== Boolean(env.S3_SECRET_ACCESS_KEY)) {
+      errors.push('Set both S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY, or neither (to use the default AWS credential chain).');
+    }
+    if (env.S3_SSE && !['AES256', 'aws:kms'].includes(env.S3_SSE)) {
+      warnings.push(`S3_SSE "${env.S3_SSE}" is not AES256 or aws:kms.`);
+    }
+  }
   return { errors, warnings };
 }
 

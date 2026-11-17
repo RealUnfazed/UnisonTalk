@@ -1,7 +1,6 @@
 require('dotenv').config();
 
 const http = require('http');
-const path = require('path');
 const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 
@@ -13,7 +12,7 @@ const rateLimit = require('./middleware/rateLimit');
 const { connectRedis, attachAdapter } = require('./config/scale');
 const { assertEncryptionKeyConfigured } = require('./utils/fieldCrypto');
 const { validateEnv } = require('./config/validateEnv');
-const { UPLOADS_DIR, AVATARS_DIR, ensureUploadDirs } = require('./config/paths');
+const { getStorage } = require('./storage');
 const { sweepOrphanUploads } = require('./utils/uploadCleanup');
 const { createShutdown, installSignalHandlers } = require('./utils/shutdown');
 const Message = require('./models/Message');
@@ -29,17 +28,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 process.on('unhandledRejection', (reason) => logger.error('[server] unhandled rejection:', reason));
 
 // Files uploaded but never attached to a message (abandoned compose, failed
-// send, interrupted avatar change) are removed once they're a day old.
+// send, interrupted avatar change) are removed once they're a day old —
+// from whichever storage is configured.
 function scheduleUploadCleanup() {
   const run = async () => {
     try {
+      const storage = getStorage();
       const attachments = await sweepOrphanUploads({
-        dir: UPLOADS_DIR,
+        storage,
+        prefix: '',
         olderThanMs: DAY_MS,
         isReferenced: (name) => Message.exists({ 'attachment.url': `/uploads/${name}` }),
       });
       const avatars = await sweepOrphanUploads({
-        dir: AVATARS_DIR,
+        storage,
+        prefix: 'avatars/',
         olderThanMs: DAY_MS,
         isReferenced: async (name) =>
           Boolean((await User.exists({ avatar: `/uploads/avatars/${name}` })) || (await Chat.exists({ avatar: `/uploads/avatars/${name}` }))),
@@ -62,7 +65,10 @@ async function main() {
   // Fail loudly and immediately if Cloud Chat encryption isn't configured
   // — much better than the first chat message mysteriously erroring out.
   assertEncryptionKeyConfigured();
-  ensureUploadDirs(); // a freshly mounted volume is empty
+
+  // Local: creates the upload folders on a freshly mounted volume. S3: nothing to do.
+  const storage = getStorage();
+  await storage.init();
 
   await connectDB();
 
@@ -73,6 +79,7 @@ async function main() {
 
   const { app, sessionMiddleware, sessionStore } = createApp();
   if (redis) app.locals.readinessChecks.push({ name: 'redis', check: () => redis.ping() });
+  app.locals.readinessChecks.push({ name: 'storage', check: () => storage.ping() });
 
   const server = http.createServer(app);
 
@@ -117,6 +124,7 @@ async function main() {
       port: Number(PORT),
       env: process.env.NODE_ENV || 'development',
       redis: Boolean(redis),
+      storage: (process.env.STORAGE_DRIVER || 'local').toLowerCase(),
     });
   });
 }

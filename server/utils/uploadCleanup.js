@@ -1,47 +1,43 @@
-const fs = require('node:fs');
-const path = require('node:path');
+const logger = require('./logger');
 
-// Files that were uploaded but never attached to a message (abandoned
-// compose, failed send, rejected request) would otherwise sit on disk
+// URL <-> storage key. These are the ONLY shapes of upload URL the app
+// produces, and the regexes are deliberately the same shape the storage
+// layer's key validation accepts.
+const NAME = '[A-Za-z0-9][A-Za-z0-9._-]{0,119}';
+const ATTACHMENT_URL_RE = new RegExp(`^/uploads/(${NAME})$`);
+const AVATAR_URL_RE = new RegExp(`^/uploads/avatars/(${NAME})$`);
+
+function attachmentKeyFromUrl(url) {
+  const match = typeof url === 'string' ? ATTACHMENT_URL_RE.exec(url) : null;
+  return match && !match[1].includes('..') ? match[1] : null;
+}
+
+function avatarKeyFromUrl(url) {
+  const match = typeof url === 'string' ? AVATAR_URL_RE.exec(url) : null;
+  return match && !match[1].includes('..') ? `avatars/${match[1]}` : null;
+}
+
+// Files uploaded but never attached to a message (abandoned compose, failed
+// send, replaced avatar whose delete failed) would otherwise sit in storage
 // forever. `isReferenced` is injected so this stays testable without a DB.
-async function sweepOrphanUploads({ dir, olderThanMs, isReferenced, now = Date.now() }) {
+async function sweepOrphanUploads({ storage, prefix = '', olderThanMs, isReferenced, now = Date.now() }) {
   const removed = [];
-  let entries;
-  try {
-    entries = await fs.promises.readdir(dir, { withFileTypes: true });
-  } catch {
-    return removed;
-  }
-  for (const entry of entries) {
-    if (!entry.isFile() || entry.name.startsWith('.')) continue;
-    const full = path.join(dir, entry.name);
-    const stat = await fs.promises.stat(full);
-    if (now - stat.mtimeMs < olderThanMs) continue; // young: its message may not have been sent yet
+  for (const entry of await storage.list(prefix)) {
+    if (entry.name.startsWith('.')) continue;
+    if (now - entry.lastModified.getTime() < olderThanMs) continue; // young: its message may not have been sent yet
     if (await isReferenced(entry.name)) continue;
-    await fs.promises.unlink(full);
+    await storage.delete(entry.key);
     removed.push(entry.name);
   }
   return removed;
 }
 
-// Remove a file multer already wrote for a request we then rejected.
-function discardUploadedFile(file) {
-  if (file && file.path) fs.promises.unlink(file.path).catch(() => {});
+// Best-effort deletes: a failure is logged and left for the orphan sweep.
+function deleteByKey(storage, key) {
+  if (!key) return Promise.resolve();
+  return storage.delete(key).catch((err) => logger.warn(`[storage] could not delete ${key}:`, err.message));
 }
+const deleteStoredAttachment = (storage, url) => deleteByKey(storage, attachmentKeyFromUrl(url));
+const deleteStoredAvatar = (storage, url) => deleteByKey(storage, avatarKeyFromUrl(url));
 
-// Remove a replaced/removed avatar. Only ever touches /uploads/avatars/<name>
-// (no subfolders, no leading dot, so no "..").
-const AVATAR_URL_RE = /^\/uploads\/avatars\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
-function deleteAvatarFile(url, uploadsRoot) {
-  if (typeof url !== 'string' || !AVATAR_URL_RE.test(url)) return;
-  fs.promises.unlink(path.join(uploadsRoot, url.replace('/uploads/', ''))).catch(() => {});
-}
-
-// Remove a deleted message's attachment. One path segment under /uploads/ only.
-const ATTACHMENT_URL_RE = /^\/uploads\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
-function deleteAttachmentFile(url, uploadsRoot) {
-  if (typeof url !== 'string' || !ATTACHMENT_URL_RE.test(url) || url.includes('..')) return;
-  fs.promises.unlink(path.join(uploadsRoot, url.replace('/uploads/', ''))).catch(() => {});
-}
-
-module.exports = { sweepOrphanUploads, discardUploadedFile, deleteAvatarFile, deleteAttachmentFile };
+module.exports = { sweepOrphanUploads, deleteStoredAttachment, deleteStoredAvatar, attachmentKeyFromUrl, avatarKeyFromUrl };

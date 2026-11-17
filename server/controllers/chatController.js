@@ -11,9 +11,10 @@ const { escapeRegex } = require('../utils/escapeRegex');
 const MESSAGE_POPULATE = require('../utils/messagePopulate');
 const { blockStatus } = require('../utils/blocks');
 const { markChatRead } = require('../utils/readState');
-const { discardUploadedFile, deleteAvatarFile } = require('../utils/uploadCleanup');
+const { deleteStoredAvatar } = require('../utils/uploadCleanup');
+const { getStorage } = require('../storage');
+const { storeAvatar } = require('../utils/avatarStorage');
 
-const { UPLOADS_DIR: UPLOADS_ROOT } = require('../config/paths');
 
 async function listChats(req, res) {
   const chats = await Chat.find({ participants: req.session.userId, ...visibleToMe(req.session.userId) })
@@ -280,29 +281,25 @@ async function updateGroup(req, res) {
   res.json(serializeChat(chatObj, req.session.userId));
 }
 
-// Group picture upload — same admin-only restriction as updateGroup.
-// multer has already written the file by the time this runs, so every
-// early return discards it (otherwise rejected uploads pile up on disk).
+// Group picture upload — same admin-only restriction as updateGroup. Every
+// check runs BEFORE the image touches storage, so a rejected request leaves
+// nothing behind.
 async function uploadGroupAvatar(req, res) {
   const { chatId } = req.params;
-  const refuse = (status, error) => {
-    discardUploadedFile(req.file);
-    return res.status(status).json({ error });
-  };
-  if (!mongoose.isValidObjectId(chatId)) return refuse(400, 'Invalid chat id');
+  if (!mongoose.isValidObjectId(chatId)) return res.status(400).json({ error: 'Invalid chat id' });
   if (!req.file) return res.status(400).json({ error: 'No image received' });
 
   const chat = await Chat.findOne({ _id: chatId, participants: req.session.userId });
-  if (!chat) return refuse(404, 'Chat not found');
-  if (!chat.isGroup) return refuse(400, 'Only groups have a group picture');
+  if (!chat) return res.status(404).json({ error: 'Chat not found' });
+  if (!chat.isGroup) return res.status(400).json({ error: 'Only groups have a group picture' });
   if (!chat.admin || chat.admin.toString() !== req.session.userId) {
-    return refuse(403, 'Only the group creator can change the group picture');
+    return res.status(403).json({ error: 'Only the group creator can change the group picture' });
   }
 
   const previous = chat.avatar;
-  chat.avatar = `/uploads/avatars/${req.file.filename}`;
+  chat.avatar = await storeAvatar(req.file); // validates, strips metadata, stores; a bad image is a 400
   await chat.save();
-  deleteAvatarFile(previous, UPLOADS_ROOT);
+  deleteStoredAvatar(getStorage(), previous);
   await chat.populate(CHAT_POPULATE);
   const chatObj = chat.toObject();
 

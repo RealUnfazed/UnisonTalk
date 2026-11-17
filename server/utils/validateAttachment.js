@@ -4,7 +4,7 @@
 // external host (turning every recipient's browser into a tracking-pixel
 // request that leaks their IP) or at any path on this server. We rebuild
 // the object from scratch with only validated fields.
-const URL_RE = /^\/uploads\/[A-Za-z0-9._-]{1,120}$/; // exactly one path segment: no subfolders, no avatars, no traversal
+const URL_RE = /^\/uploads\/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/; // exactly one path segment: no subfolders, no avatars, no traversal
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const MIME_RE = /^[A-Za-z0-9][\w.+-]*\/[A-Za-z0-9][\w.+-]*$/;
 

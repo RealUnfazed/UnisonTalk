@@ -1,10 +1,9 @@
-const path = require('path');
 const User = require('../models/User');
 const Chat = require('../models/Chat');
 const { serializeUser } = require('../utils/serialize');
-const { discardUploadedFile, deleteAvatarFile } = require('../utils/uploadCleanup');
-
-const { UPLOADS_DIR: UPLOADS_ROOT } = require('../config/paths');
+const { deleteStoredAvatar } = require('../utils/uploadCleanup');
+const { getStorage } = require('../storage');
+const { storeAvatar } = require('../utils/avatarStorage');
 
 // A single flexible endpoint for the whole "Settings" panel rather than
 // one route per field — the client only ever sends the fields that
@@ -45,17 +44,17 @@ async function updateProfile(req, res) {
 
 async function uploadAvatar(req, res) {
   if (!req.file) return res.status(400).json({ error: 'No image received' });
+
+  // Validates the image, strips its metadata (EXIF/GPS) and stores it. A bad
+  // image is a 400 and nothing has been written.
+  const avatarUrl = await storeAvatar(req.file);
   const previous = await User.findById(req.session.userId).select('avatar').lean();
-  const user = await User.findByIdAndUpdate(
-    req.session.userId,
-    { avatar: `/uploads/avatars/${req.file.filename}` },
-    { new: true }
-  ).select('-password');
+  const user = await User.findByIdAndUpdate(req.session.userId, { avatar: avatarUrl }, { new: true }).select('-password');
   if (!user) {
-    discardUploadedFile(req.file);
+    await deleteStoredAvatar(getStorage(), avatarUrl);
     return res.status(401).json({ error: 'Not authenticated' });
   }
-  deleteAvatarFile(previous && previous.avatar, UPLOADS_ROOT); // don't leave the replaced picture on disk
+  deleteStoredAvatar(getStorage(), previous && previous.avatar); // don't keep the replaced picture
   await broadcastUserUpdate(req, user);
   res.json({ user: serializeUser(user, req.session.userId) });
 }
@@ -63,7 +62,7 @@ async function uploadAvatar(req, res) {
 async function removeAvatar(req, res) {
   const previous = await User.findById(req.session.userId).select('avatar').lean();
   const user = await User.findByIdAndUpdate(req.session.userId, { avatar: null }, { new: true }).select('-password');
-  deleteAvatarFile(previous && previous.avatar, UPLOADS_ROOT);
+  deleteStoredAvatar(getStorage(), previous && previous.avatar);
   await broadcastUserUpdate(req, user);
   res.json({ user: serializeUser(user, req.session.userId) });
 }
